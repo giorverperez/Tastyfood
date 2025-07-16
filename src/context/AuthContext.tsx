@@ -21,7 +21,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Verificar sesión actual
     const getSession = async () => {
-      const { data: { session }, error } = await supabase.auth.getSession();
+      const { data: { session } } = await supabase.auth.getSession();
       setUser(session?.user ?? null);
       setLoading(false);
     };
@@ -40,28 +40,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signIn = async (email: string, password: string) => {
-  try {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    
-    if (error) {
-      console.error("Error de autenticación:", error.message);
-      throw error;
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      
+      if (error) {
+        console.error("Error de autenticación:", error.message);
+        throw error;
+      }
+    } catch (err: unknown) {
+      console.error("Error inesperado:", err);
+      throw err;
     }
-  } catch (error) {
-    console.error("Error inesperado:", error);
-    throw error;
-  }
-};
+  };
 
   const signUp = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-    if (error) throw error;
+    try {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+      });
+      
+      if (error) {
+        console.error("Error de registro:", error.message);
+        throw error;
+      }
+    } catch (err: unknown) {
+      console.error("Error inesperado en registro:", err);
+      throw err;
+    }
   };
 
   const signOut = async () => {

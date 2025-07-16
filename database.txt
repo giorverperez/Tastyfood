@@ -1,0 +1,349 @@
+CREATE TABLE profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id),
+  first_name TEXT,
+  last_name TEXT,
+  cedula_ruc TEXT,
+  phone TEXT,
+  gender TEXT,
+  birth_date DATE,
+  role TEXT CHECK (role IN ('admin', 'employee', 'customer')),
+  created_at TIMESTAMP DEFAULT now(),
+  updated_at TIMESTAMP DEFAULT now()
+);
+
+CREATE TABLE countries (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL
+);
+
+
+CREATE TABLE provinces (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  country_id INTEGER REFERENCES countries(id)
+);
+
+CREATE INDEX idx_provinces_country_id ON provinces(country_id);
+
+CREATE TABLE cantons (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  province_id INTEGER REFERENCES provinces(id)
+);
+
+CREATE INDEX idx_cantons_province_id ON cantons(province_id);
+
+
+CREATE TABLE addresses (
+  id SERIAL PRIMARY KEY,
+  user_id UUID REFERENCES profiles(id),
+  country_id INTEGER REFERENCES countries(id),
+  province_id INTEGER REFERENCES provinces(id),
+  canton_id INTEGER REFERENCES cantons(id),
+  street_address TEXT,
+  reference TEXT
+);
+-- ============================================
+-- SISTEMA DE FACTURACIÓN PARA SUPABASE
+-- ============================================
+
+-- Tabla de secciones principales
+CREATE TABLE secciones (
+    id SERIAL PRIMARY KEY,
+    nombre VARCHAR(100) NOT NULL UNIQUE, -- 'desayunos', 'almuerzos', 'meriendas'
+    descripcion TEXT,
+    activo BOOLEAN DEFAULT true,
+    orden INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Tabla de productos
+CREATE TABLE productos (
+    id SERIAL PRIMARY KEY,
+    seccion_id INTEGER REFERENCES secciones(id) ON DELETE CASCADE,
+    nombre VARCHAR(200) NOT NULL,
+    descripcion TEXT,
+    precio DECIMAL(10,2) NOT NULL,
+    imagen_url TEXT,
+    activo BOOLEAN DEFAULT true,
+    orden INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Tabla de stock diario por producto
+CREATE TABLE stock_diario (
+    id SERIAL PRIMARY KEY,
+    producto_id INTEGER REFERENCES productos(id) ON DELETE CASCADE,
+    fecha DATE NOT NULL,
+    cantidad_inicial INTEGER NOT NULL DEFAULT 0,
+    cantidad_actual INTEGER NOT NULL DEFAULT 0,
+    cantidad_vendida INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(producto_id, fecha)
+);
+
+-- Tabla de facturas
+CREATE TABLE facturas (
+    id SERIAL PRIMARY KEY,
+    numero_factura VARCHAR(50) UNIQUE NOT NULL,
+    cliente_id UUID REFERENCES profiles(id),
+    empleado_id UUID REFERENCES profiles(id),
+    subtotal DECIMAL(10,2) NOT NULL,
+    impuesto DECIMAL(10,2) NOT NULL DEFAULT 0,
+    descuento DECIMAL(10,2) NOT NULL DEFAULT 0,
+    total DECIMAL(10,2) NOT NULL,
+    estado VARCHAR(20) DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'pagado', 'cancelado')),
+    metodo_pago VARCHAR(20) CHECK (metodo_pago IN ('efectivo', 'tarjeta', 'transferencia')),
+    notas TEXT,
+    fecha_factura TIMESTAMP DEFAULT NOW(),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Tabla de detalles de factura
+CREATE TABLE factura_detalles (
+    id SERIAL PRIMARY KEY,
+    factura_id INTEGER REFERENCES facturas(id) ON DELETE CASCADE,
+    producto_id INTEGER REFERENCES productos(id),
+    cantidad INTEGER NOT NULL,
+    precio_unitario DECIMAL(10,2) NOT NULL,
+    precio_total DECIMAL(10,2) NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Tabla de ventas (para tracking individual por producto)
+CREATE TABLE ventas (
+    id SERIAL PRIMARY KEY,
+    factura_id INTEGER REFERENCES facturas(id),
+    producto_id INTEGER REFERENCES productos(id),
+    cantidad INTEGER NOT NULL,
+    precio_unitario DECIMAL(10,2) NOT NULL,
+    precio_total DECIMAL(10,2) NOT NULL,
+    fecha_venta TIMESTAMP DEFAULT NOW(),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================
+-- HABILITAR REALTIME PARA TODAS LAS TABLAS
+-- ============================================
+
+ALTER TABLE secciones ENABLE REALTIME;
+ALTER TABLE productos ENABLE REALTIME;
+ALTER TABLE stock_diario ENABLE REALTIME;
+ALTER TABLE facturas ENABLE REALTIME;
+ALTER TABLE factura_detalles ENABLE REALTIME;
+ALTER TABLE ventas ENABLE REALTIME;
+
+-- ============================================
+-- FUNCIONES Y TRIGGERS
+-- ============================================
+
+-- Función para generar número de factura automático
+CREATE OR REPLACE FUNCTION generar_numero_factura()
+RETURNS TEXT AS $$
+DECLARE
+    numero_actual INTEGER;
+    fecha_actual TEXT;
+BEGIN
+    fecha_actual := TO_CHAR(NOW(), 'YYYYMMDD');
+    
+    SELECT COALESCE(MAX(CAST(SUBSTRING(numero_factura FROM 10) AS INTEGER)), 0) + 1
+    INTO numero_actual
+    FROM facturas
+    WHERE numero_factura LIKE fecha_actual || '%';
+    
+    RETURN fecha_actual || '-' || LPAD(numero_actual::TEXT, 4, '0');
+END;
+$$ LANGUAGE plpgsql;
+
+-- Función para actualizar stock cuando se realiza una venta
+CREATE OR REPLACE FUNCTION actualizar_stock_venta()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Actualizar stock actual y cantidad vendida
+    UPDATE stock_diario 
+    SET 
+        cantidad_actual = cantidad_actual - NEW.cantidad,
+        cantidad_vendida = cantidad_vendida + NEW.cantidad,
+        updated_at = NOW()
+    WHERE producto_id = NEW.producto_id 
+    AND fecha = CURRENT_DATE;
+    
+    -- Si no existe stock para hoy, crearlo con cantidad inicial 0
+    IF NOT FOUND THEN
+        INSERT INTO stock_diario (producto_id, fecha, cantidad_inicial, cantidad_actual, cantidad_vendida)
+        VALUES (NEW.producto_id, CURRENT_DATE, 0, -NEW.cantidad, NEW.cantidad);
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger para actualizar stock automáticamente en ventas
+CREATE TRIGGER trigger_actualizar_stock_venta
+    AFTER INSERT ON ventas
+    FOR EACH ROW
+    EXECUTE FUNCTION actualizar_stock_venta();
+
+-- Función para inicializar stock diario
+CREATE OR REPLACE FUNCTION inicializar_stock_diario(p_producto_id INTEGER, p_cantidad INTEGER)
+RETURNS VOID AS $$
+BEGIN
+    INSERT INTO stock_diario (producto_id, fecha, cantidad_inicial, cantidad_actual, cantidad_vendida)
+    VALUES (p_producto_id, CURRENT_DATE, p_cantidad, p_cantidad, 0)
+    ON CONFLICT (producto_id, fecha) 
+    DO UPDATE SET 
+        cantidad_inicial = p_cantidad,
+        cantidad_actual = p_cantidad,
+        cantidad_vendida = 0,
+        updated_at = NOW();
+END;
+$$ LANGUAGE plpgsql;
+
+-- Función para crear factura completa
+CREATE OR REPLACE FUNCTION crear_factura(
+    p_cliente_id UUID,
+    p_empleado_id UUID,
+    p_productos JSON,
+    p_metodo_pago VARCHAR(20) DEFAULT 'efectivo',
+    p_notas TEXT DEFAULT NULL
+)
+RETURNS JSON AS $$
+DECLARE
+    v_factura_id INTEGER;
+    v_numero_factura TEXT;
+    v_subtotal DECIMAL(10,2) := 0;
+    v_impuesto DECIMAL(10,2) := 0;
+    v_total DECIMAL(10,2) := 0;
+    v_producto JSON;
+    v_producto_info productos%ROWTYPE;
+    v_stock_actual INTEGER;
+    v_precio_linea DECIMAL(10,2);
+    resultado JSON;
+BEGIN
+    -- Generar número de factura
+    v_numero_factura := generar_numero_factura();
+    
+    -- Validar todos los productos y calcular totales
+    FOR v_producto IN SELECT * FROM json_array_elements(p_productos)
+    LOOP
+        -- Obtener información del producto
+        SELECT * INTO v_producto_info 
+        FROM productos 
+        WHERE id = (v_producto->>'producto_id')::INTEGER;
+        
+        IF NOT FOUND THEN
+            RETURN json_build_object(
+                'success', false, 
+                'message', 'Producto no encontrado: ' || (v_producto->>'producto_id')
+            );
+        END IF;
+        
+        -- Verificar stock disponible
+        SELECT COALESCE(cantidad_actual, 0) INTO v_stock_actual
+        FROM stock_diario 
+        WHERE producto_id = (v_producto->>'producto_id')::INTEGER 
+        AND fecha = CURRENT_DATE;
+        
+        IF v_stock_actual < (v_producto->>'cantidad')::INTEGER THEN
+            RETURN json_build_object(
+                'success', false,
+                'message', 'Stock insuficiente para: ' || v_producto_info.nombre
+            );
+        END IF;
+        
+        -- Calcular precio de línea
+        v_precio_linea := v_producto_info.precio * (v_producto->>'cantidad')::INTEGER;
+        v_subtotal := v_subtotal + v_precio_linea;
+    END LOOP;
+    
+    -- Calcular impuesto (15% por ejemplo)
+    v_impuesto := v_subtotal * 0.15;
+    v_total := v_subtotal + v_impuesto;
+    
+    -- Crear factura
+    INSERT INTO facturas (numero_factura, cliente_id, empleado_id, subtotal, impuesto, total, metodo_pago, notas)
+    VALUES (v_numero_factura, p_cliente_id, p_empleado_id, v_subtotal, v_impuesto, v_total, p_metodo_pago, p_notas)
+    RETURNING id INTO v_factura_id;
+    
+    -- Crear detalles de factura y ventas
+    FOR v_producto IN SELECT * FROM json_array_elements(p_productos)
+    LOOP
+        SELECT * INTO v_producto_info 
+        FROM productos 
+        WHERE id = (v_producto->>'producto_id')::INTEGER;
+        
+        v_precio_linea := v_producto_info.precio * (v_producto->>'cantidad')::INTEGER;
+        
+        -- Insertar detalle de factura
+        INSERT INTO factura_detalles (factura_id, producto_id, cantidad, precio_unitario, precio_total)
+        VALUES (v_factura_id, (v_producto->>'producto_id')::INTEGER, 
+                (v_producto->>'cantidad')::INTEGER, v_producto_info.precio, v_precio_linea);
+        
+        -- Insertar venta (esto activará el trigger para actualizar stock)
+        INSERT INTO ventas (factura_id, producto_id, cantidad, precio_unitario, precio_total)
+        VALUES (v_factura_id, (v_producto->>'producto_id')::INTEGER, 
+                (v_producto->>'cantidad')::INTEGER, v_producto_info.precio, v_precio_linea);
+    END LOOP;
+    
+    -- Retornar resultado exitoso
+    resultado := json_build_object(
+        'success', true,
+        'factura_id', v_factura_id,
+        'numero_factura', v_numero_factura,
+        'subtotal', v_subtotal,
+        'impuesto', v_impuesto,
+        'total', v_total
+    );
+    
+    RETURN resultado;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================
+-- VISTA PARA FACTURAS COMPLETAS
+-- ============================================
+
+CREATE VIEW facturas_completas AS
+SELECT 
+    f.id,
+    f.numero_factura,
+    f.subtotal,
+    f.impuesto,
+    f.descuento,
+    f.total,
+    f.estado,
+    f.metodo_pago,
+    f.notas,
+    f.fecha_factura,
+    -- Información del cliente
+    pc.first_name as cliente_nombre,
+    pc.last_name as cliente_apellido,
+    pc.cedula_ruc as cliente_cedula,
+    pc.phone as cliente_telefono,
+    -- Información del empleado
+    pe.first_name as empleado_nombre,
+    pe.last_name as empleado_apellido,
+    -- Detalles de productos
+    json_agg(
+        json_build_object(
+            'producto_id', fd.producto_id,
+            'producto_nombre', p.nombre,
+            'cantidad', fd.cantidad,
+            'precio_unitario', fd.precio_unitario,
+            'precio_total', fd.precio_total
+        )
+    ) as productos
+FROM facturas f
+LEFT JOIN profiles pc ON f.cliente_id = pc.id
+LEFT JOIN profiles pe ON f.empleado_id = pe.id
+LEFT JOIN factura_detalles fd ON f.id = fd.factura_id
+LEFT JOIN productos p ON fd.producto_id = p.id
+GROUP BY f.id, f.numero_factura, f.subtotal, f.impuesto, f.descuento, f.total, 
+         f.estado, f.metodo_pago, f.notas, f.fecha_factura,
+         pc.first_name, pc.last_name, pc.cedula_ruc, pc.phone,
+         pe.first_name, pe.last_name
+ORDER BY f.fecha_factura DESC;

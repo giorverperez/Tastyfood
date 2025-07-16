@@ -27,8 +27,26 @@ export default function RegisterPage() {
     try {
       await signUp(email, password);
       router.push('/login');
-    } catch (error) {
-      setError('Error al crear la cuenta. Por favor, intenta de nuevo.');
+    } catch (err: unknown) {
+      console.error('Error en registro:', err);
+      
+      // Manejo específico de errores
+      const error = err as { message?: string };
+      if (error?.message) {
+        if (error.message.includes('Invalid API key')) {
+          setError('Error de configuración. Contacta al administrador.');
+        } else if (error.message.includes('User already registered')) {
+          setError('Este correo ya está registrado. Intenta iniciar sesión.');
+        } else if (error.message.includes('Password should be at least')) {
+          setError('La contraseña debe tener al menos 6 caracteres.');
+        } else if (error.message.includes('Invalid email')) {
+          setError('Por favor, ingresa un correo electrónico válido.');
+        } else {
+          setError(`Error: ${error.message}`);
+        }
+      } else {
+        setError('Error al crear la cuenta. Por favor, intenta de nuevo.');
+      }
     } finally {
       setIsLoading(false);
     }

@@ -3,87 +3,175 @@
 import { useState } from 'react';
 import Layout from '@/components/Layout';
 import { useCart } from '@/context/CartContext';
-
-interface Product {
-  id: string;
-  name: string;
-  description: string;
-  price: number;
-  category: string;
-  image: string;
-}
-
-const categories = ['Todos', 'Hamburguesas', 'Pizzas', 'Bebidas', 'Postres'];
+import { useProducts } from '@/hooks/useProducts';
+import { Producto } from '@/lib/database';
 
 export default function ProductsPage() {
-  const [selectedCategory, setSelectedCategory] = useState('Todos');
-  const { addItem } = useCart();
+  const [selectedSeccion, setSelectedSeccion] = useState<number | null>(null);
+  const { addItem, loading: cartLoading } = useCart();
+  const { productos, secciones, loading, error } = useProducts();
+  const [addingToCart, setAddingToCart] = useState<number | null>(null);
+  const [mensaje, setMensaje] = useState<string | null>(null);
 
-  const products: Product[] = [
-    {
-      id: '1',
-      name: 'Hamburguesa Clásica',
-      description: 'Deliciosa hamburguesa con carne de res, lechuga, tomate y queso',
-      price: 12.99,
-      category: 'Hamburguesas',
-      image: '/products/hamburger.jpg'
-    },
-    // Más productos se agregarán aquí
-  ];
+  const filteredProducts = selectedSeccion === null
+    ? productos
+    : productos.filter(producto => producto.seccion_id === selectedSeccion);
 
-  const filteredProducts = selectedCategory === 'Todos'
-    ? products
-    : products.filter(product => product.category === selectedCategory);
-
-  const handleAddToCart = (product: Product) => {
-    addItem({
-      id: parseInt(product.id),
-      name: product.name,
-      price: product.price,
-      quantity: 1
-    });
+  const handleAddToCart = async (producto: Producto & { stock_disponible: number }) => {
+    setAddingToCart(producto.id);
+    setMensaje(null);
+    
+    try {
+      const result = await addItem({
+        id: producto.id,
+        name: producto.nombre,
+        price: producto.precio,
+        quantity: 1
+      });
+      
+      if (result.success) {
+        setMensaje(`${producto.nombre} agregado al carrito`);
+      } else {
+        setMensaje(result.message || 'Error al agregar al carrito');
+      }
+    } catch  {
+      setMensaje('Error al agregar al carrito');
+    } finally {
+      setAddingToCart(null);
+      // Limpiar mensaje después de 3 segundos
+      setTimeout(() => setMensaje(null), 3000);
+    }
   };
+
+  if (loading) {
+    return (
+      <Layout>
+        <div className="max-w-6xl mx-auto px-4 py-8">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600">Cargando productos...</p>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
+  if (error) {
+    return (
+      <Layout>
+        <div className="max-w-6xl mx-auto px-4 py-8">
+          <div className="text-center">
+            <p className="text-red-600">{error}</p>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-6">Nuestro Menú</h1>
-        <div className="flex gap-4 mb-6 overflow-x-auto pb-2">
-          {categories.map(category => (
-            <button
-              key={category}
-              onClick={() => setSelectedCategory(category)}
-              className={`px-4 py-2 rounded-full ${selectedCategory === category
+      <div className="max-w-6xl mx-auto px-4 py-8">
+        <h1 className="text-3xl font-bold mb-8">Nuestro Menú</h1>
+        
+        {/* Mensaje de estado */}
+        {mensaje && (
+          <div className={`mb-4 p-4 rounded-lg ${
+            mensaje.includes('Error') || mensaje.includes('insuficiente') 
+              ? 'bg-red-100 text-red-700 border border-red-300' 
+              : 'bg-green-100 text-green-700 border border-green-300'
+          }`}>
+            {mensaje}
+          </div>
+        )}
+        
+        {/* Filtros de sección */}
+        <div className="flex flex-wrap gap-4 mb-8">
+          <button
+            onClick={() => setSelectedSeccion(null)}
+            className={`px-4 py-2 rounded-lg transition-colors ${
+              selectedSeccion === null
                 ? 'bg-blue-600 text-white'
-                : 'bg-gray-200 hover:bg-gray-300'}`}
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`}
+          >
+            Todos
+          </button>
+          {secciones.map(seccion => (
+            <button
+              key={seccion.id}
+              onClick={() => setSelectedSeccion(seccion.id)}
+              className={`px-4 py-2 rounded-lg transition-colors ${
+                selectedSeccion === seccion.id
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
             >
-              {category}
+              {seccion.nombre}
             </button>
           ))}
         </div>
+
+        {/* Grid de productos */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredProducts.map((product) => (
-          <div key={product.id} className="bg-white rounded-lg shadow-md overflow-hidden">
-            <div className="aspect-w-16 aspect-h-9 bg-gray-200">
-              {/* Aquí irá la imagen del producto */}
-              <div className="h-48 bg-gray-300"></div>
-            </div>
-            <div className="p-4">
-              <h2 className="text-xl font-semibold mb-2">{product.name}</h2>
-              <p className="text-gray-600 mb-4">{product.description}</p>
-              <div className="flex justify-between items-center">
-                <span className="text-lg font-bold">${product.price.toFixed(2)}</span>
-                <button
-                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
-                  onClick={() => handleAddToCart(product)}
-                >
-                  Agregar al Carrito
-                </button>
+          {filteredProducts.map(producto => (
+            <div key={producto.id} className="bg-white rounded-lg shadow-md overflow-hidden">
+              <img
+                src={producto.imagen_url || '/placeholder-food.jpg'}
+                alt={producto.nombre}
+                className="w-full h-48 object-cover"
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  target.src = '/placeholder-food.jpg';
+                }}
+              />
+              <div className="p-4">
+                <h3 className="text-xl font-semibold mb-2">{producto.nombre}</h3>
+                <p className="text-gray-600 mb-2">{producto.descripcion}</p>
+                <div className="mb-4">
+                  <span className={`text-sm px-2 py-1 rounded ${
+                    producto.stock_disponible > 0 
+                      ? 'bg-green-100 text-green-800' 
+                      : 'bg-red-100 text-red-800'
+                  }`}>
+                    {producto.stock_disponible > 0 
+                      ? `Disponible hoy: ${producto.stock_disponible}` 
+                      : 'Sin stock hoy'
+                    }
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-2xl font-bold text-green-600">
+                    ${producto.precio}
+                  </span>
+                  <button
+                    onClick={() => handleAddToCart(producto)}
+                    disabled={producto.stock_disponible === 0 || addingToCart === producto.id || cartLoading}
+                    className={`px-4 py-2 rounded-lg transition-colors ${
+                      producto.stock_disponible === 0
+                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        : addingToCart === producto.id
+                        ? 'bg-orange-400 text-white cursor-wait'
+                        : 'bg-orange-500 text-white hover:bg-orange-600'
+                    }`}
+                  >
+                    {addingToCart === producto.id
+                      ? 'Agregando...'
+                      : producto.stock_disponible === 0
+                      ? 'Sin Stock'
+                      : 'Agregar al Carrito'
+                    }
+                  </button>
+                </div>
               </div>
             </div>
+          ))}
+        </div>
+
+        {filteredProducts.length === 0 && (
+          <div className="text-center py-8">
+            <p className="text-gray-600">No hay productos disponibles en esta sección.</p>
           </div>
-        ))}
-      </div>
+        )}
       </div>
     </Layout>
   );

@@ -19,7 +19,7 @@ export default function LoginPage() {
 
     try {
       await signIn(email, password);
-      router.push('/productos');
+      router.push('/');
     } catch  {
       setError('Error al iniciar sesión. Por favor, verifica tus credenciales.');
     } finally {

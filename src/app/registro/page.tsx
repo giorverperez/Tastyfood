@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+
 import { useAuth } from '@/context/AuthContext';
 
 export default function RegisterPage() {
@@ -25,7 +26,16 @@ export default function RegisterPage() {
     setIsLoading(true);
 
     try {
-      await signUp(email, password);
+      // Provide empty profile data for basic registration
+      const profileData = {
+        first_name: '',
+        last_name: '',
+        cedula_ruc: '',
+        phone: '',
+        gender: '',
+        birth_date: ''
+      };
+      await signUp(email, password, profileData);
       router.push('/login');
     } catch (err: unknown) {
       console.error('Error en registro:', err);

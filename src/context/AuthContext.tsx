@@ -4,11 +4,20 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 
+type UserProfile = {
+  first_name: string;
+  last_name: string;
+  cedula_ruc: string;
+  phone: string;
+  gender: string;
+  birth_date: string;
+};
+
 type AuthContextType = {
   user: User | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string) => Promise<void>;
+  signUp: (email: string, password: string, profileData: UserProfile) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -56,9 +65,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const signUp = async (email: string, password: string) => {
+  const signUp = async (email: string, password: string, profileData: UserProfile) => {
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
       });
@@ -66,6 +75,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error) {
         console.error("Error de registro:", error.message);
         throw error;
+      }
+
+      // Create user profile if registration was successful and user exists
+      if (data.user && profileData) {
+        const { error: profileError } = await supabase
+          .from('user_profiles')
+          .insert({
+            user_id: data.user.id,
+            email: data.user.email,
+            ...profileData
+          });
+        
+        if (profileError) {
+          console.error("Error creating profile:", profileError.message);
+          // Don't throw here as the user account was created successfully
+        }
       }
     } catch (err: unknown) {
       console.error("Error inesperado en registro:", err);

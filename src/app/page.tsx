@@ -3,8 +3,10 @@
 import { useState, useEffect } from 'react';
 import { Menu, X, ShoppingCart, Clock, Phone, Mail, Facebook, Instagram, Twitter, ArrowRight, Star } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { seccionesService, productosService, Seccion, Producto } from '@/lib/database';
 import { useCart } from '@/context/CartContext';
+import { useAuth } from '@/context/AuthContext';
 
 export default function Home() {
   const [scrolled, setScrolled] = useState(false);
@@ -15,7 +17,10 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [addingToCart, setAddingToCart] = useState<number | null>(null);
   const [mensaje, setMensaje] = useState<string | null>(null);
+  const [showDropdown, setShowDropdown] = useState(false);
   const { addItem, totalItems, loading: cartLoading } = useCart();
+  const { user, signOut } = useAuth();
+  const router = useRouter();
 
   // Promociones
   const promos = [
@@ -133,12 +138,43 @@ export default function Home() {
                   </span>
                 )}
               </Link>
-              <Link
-                href="/pedidos"
-                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
-              >
-                Mi Cuenta
-              </Link>
+              {user ? (
+                <div 
+                  className="relative"
+                  onMouseEnter={() => setShowDropdown(true)}
+                  onMouseLeave={() => setShowDropdown(false)}
+                >
+                  <button className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors flex items-center gap-1">
+                    Mi Cuenta
+                  </button>
+                  {showDropdown && (
+                    <div className="absolute right-0 top-full w-48 bg-transparent rounded-md shadow-lg  z-10 ">
+                      <Link href="/perfil" className="block bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                        Mi Perfil
+                      </Link>
+                      <Link href="/pedidos" className="block bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                        Mis Pedidos
+                      </Link>
+                      <button 
+                         onClick={async () => {
+                           await signOut();
+                           router.push('/');
+                         }}
+                         className="block bg-red-600 w-full text-left px-4 py-2 text-sm text-white hover:bg-red-700 transition-colors rounded-b-lg"
+                       >
+                         Cerrar Sesión
+                       </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <Link
+                  href="/login"
+                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
+                >
+                  Iniciar Sesión
+                </Link>
+              )}
             </div>
             
             {/* Botón de menú móvil */}
@@ -195,13 +231,42 @@ export default function Home() {
                     </span>
                   )}
                 </Link>
-                <Link
-                  href="/pedidos"
-                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors text-center"
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  Mi Cuenta
-                </Link>
+                {user ? (
+                  <div className="space-y-2">
+                    <Link 
+                      href="/perfil" 
+                      className="block font-medium hover:text-blue-600 transition-colors"
+                      onClick={() => setMobileMenuOpen(false)}
+                    >
+                      Mi Perfil
+                    </Link>
+                    <Link 
+                      href="/pedidos" 
+                      className="block font-medium hover:text-blue-600 transition-colors"
+                      onClick={() => setMobileMenuOpen(false)}
+                    >
+                      Mis Pedidos
+                    </Link>
+                    <button 
+                      onClick={async () => {
+                        await signOut();
+                        router.push('/');
+                        setMobileMenuOpen(false);
+                      }}
+                      className="block w-full text-left font-medium hover:text-blue-600 transition-colors"
+                    >
+                      Cerrar Sesión
+                    </button>
+                  </div>
+                ) : (
+                  <Link
+                    href="/login"
+                    className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors text-center"
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    Iniciar Sesión
+                  </Link>
+                )}
               </div>
             </div>
           )}
@@ -329,7 +394,7 @@ export default function Home() {
                       <span className="ml-2 text-xs text-gray-500">Stock: {product.stock_disponible}</span>
                     </div>
                     <div className="flex justify-between items-center mt-4">
-                      <span className="font-bold text-lg text-green-600">₡{product.precio.toLocaleString()}</span>
+                      <span className="font-bold text-lg text-green-600">${product.precio.toLocaleString()}</span>
                       <button 
                         onClick={() => handleAddToCart(product)}
                         disabled={product.stock_disponible === 0 || addingToCart === product.id || cartLoading}

@@ -46,7 +46,7 @@ export interface Factura {
   descuento: number;
   total: number;
   estado: 'pendiente' | 'pagado' | 'cancelado';
-  metodo_pago?: 'efectivo' | 'tarjeta' | 'transferencia';
+  metodo_pago?: 'efectivo';
   notas?: string;
   fecha_factura: string;
   created_at: string;
@@ -90,7 +90,7 @@ export interface FacturaCompleta {
   descuento: number;
   total: number;
   estado: 'pendiente' | 'confirmada' | 'entregada' | 'cancelada';
-  metodo_pago: 'efectivo' | 'tarjeta' | 'transferencia';
+  metodo_pago: 'efectivo';
   notas?: string;
   fecha_factura: string;
   cliente_nombre?: string;
@@ -342,42 +342,122 @@ export const facturasService = {
     metodo_pago: 'efectivo' | 'tarjeta' | 'transferencia';
     notas?: string;
   }): Promise<RespuestaCrearFactura> {
-    const { cliente_id, productos, metodo_pago, notas } = datosFactura;
+    try {
+      const { cliente_id, productos, metodo_pago, notas } = datosFactura;
 
-    // Preparar productos en formato JSON para la función de BD
-     const productosJson = productos.map(p => ({
-       producto_id: p.id,
-       cantidad: p.quantity
-     }));
+      // Validar datos de entrada
+      if (!cliente_id) {
+        return {
+          success: false,
+          message: 'ID de cliente requerido'
+        };
+      }
 
-    // Usar la función crear_factura de la base de datos
-    const { data, error } = await supabase.rpc('crear_factura', {
-      p_cliente_id: cliente_id,
-      p_empleado_id: null, // En este caso no hay empleado específico
-      p_productos: JSON.stringify(productosJson),
-      p_metodo_pago: metodo_pago,
-      p_notas: notas || null
-    });
+      if (!productos || productos.length === 0) {
+        return {
+          success: false,
+          message: 'Debe incluir al menos un producto'
+        };
+      }
 
-    if (error) throw error;
-    
-    // Verificar si la función retornó un error
-    if (data && !data.success) {
-      throw new Error(data.message);
+      // Preparar productos en formato JSON para la función de BD
+      const productosJson = productos.map(p => ({
+        producto_id: p.id,
+        cantidad: p.quantity
+      }));
+
+      console.log('Datos enviados a crear_factura:', {
+         p_cliente_id: cliente_id,
+         p_empleado_id: null,
+         p_productos: productosJson,
+         p_metodo_pago: metodo_pago,
+         p_notas: notas || null
+       });
+ 
+       // Usar la función crear_factura de la base de datos
+       const { data, error } = await supabase.rpc('crear_factura', {
+         p_cliente_id: cliente_id,
+         p_empleado_id: null, // En este caso no hay empleado específico
+         p_productos: productosJson,
+         p_metodo_pago: metodo_pago,
+         p_notas: notas || null
+       });
+
+      if (error) {
+        console.error('Error en supabase.rpc crear_factura:', error);
+        return {
+          success: false,
+          message: `Error de base de datos: ${error.message}`
+        };
+      }
+      
+      console.log('Respuesta de crear_factura:', data);
+      
+      // Verificar si la función retornó un error
+      if (data && !data.success) {
+        return {
+          success: false,
+          message: data.message || 'Error desconocido al crear factura'
+        };
+      }
+
+      return data || {
+        success: false,
+        message: 'No se recibió respuesta de la base de datos'
+      };
+    } catch (error) {
+      console.error('Error en facturasService.crear:', error);
+      return {
+        success: false,
+        message: `Error inesperado: ${error instanceof Error ? error.message : 'Error desconocido'}`
+      };
     }
-
-    return data;
   },
 
   async obtenerPorUsuario(clienteId: string): Promise<FacturaCompleta[]> {
     const { data, error } = await supabase
-      .from('facturas_completas')
-      .select('*')
+      .from('facturas')
+      .select(`
+        id,
+        numero_factura,
+        subtotal,
+        impuesto,
+        descuento,
+        total,
+        estado,
+        metodo_pago,
+        notas,
+        fecha_factura,
+        cliente_id,
+        factura_detalles(
+          id,
+          producto_id,
+          cantidad,
+          precio_unitario,
+          precio_total,
+          productos(
+            nombre
+          )
+        )
+      `)
       .eq('cliente_id', clienteId)
-      .order('fecha', { ascending: false });
+      .order('fecha_factura', { ascending: false });
     
     if (error) throw error;
-    return data || [];
+    
+    // Transformar los datos para que coincidan con la estructura esperada
+    const facturas = (data || []).map(factura => ({
+      ...factura,
+      productos: factura.factura_detalles?.map(detalle => ({
+        producto_id: detalle.producto_id,
+        producto_nombre: detalle.productos?.nombre || '',
+        cantidad: detalle.cantidad,
+        precio_unitario: detalle.precio_unitario,
+        precio_total: detalle.precio_total
+      })) || []
+    }));
+    
+    return facturas;
   },
 
   async obtenerPorCliente(clienteId: string): Promise<FacturaCompleta[]> {

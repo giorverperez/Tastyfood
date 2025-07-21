@@ -6,6 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { facturasService, ProductoCarrito } from '@/lib/database';
+import QRCode from 'qrcode';
 
 export default function CartPage() {
   const { items, removeItem, updateQuantity, totalPrice, verificarDisponibilidad, clearCart, loading: cartLoading } = useCart();
@@ -13,7 +14,8 @@ export default function CartPage() {
   const router = useRouter();
   const [processingOrder, setProcessingOrder] = useState(false);
   const [orderMessage, setOrderMessage] = useState<string | null>(null);
-  const [metodoPago, setMetodoPago] = useState<'efectivo' | 'tarjeta' | 'transferencia'>('efectivo');
+  const [showQR, setShowQR] = useState(false);
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
 
   const handleUpdateQuantity = async (itemId: number, newQuantity: number) => {
     const result = await updateQuantity(itemId, newQuantity);
@@ -54,18 +56,24 @@ export default function CartPage() {
       const resultado = await facturasService.crear({
         cliente_id: user.id,
         productos,
-        metodo_pago: metodoPago,
+        metodo_pago: 'efectivo',
         notas: 'Pedido realizado desde la aplicación web'
       });
 
       if (resultado.success) {
+        // Generar QR con información del pedido
+        const qrData = JSON.stringify({
+          numero_factura: resultado.numero_factura,
+          total: resultado.total,
+          fecha: new Date().toISOString(),
+          cliente_id: user.id
+        });
+        
+        const qrUrl = await QRCode.toDataURL(qrData);
+        setQrCodeUrl(qrUrl);
+        setShowQR(true);
         setOrderMessage(`¡Pedido creado exitosamente! Número de factura: ${resultado.numero_factura}`);
         clearCart();
-        
-        // Redirigir a pedidos después de 3 segundos
-        setTimeout(() => {
-          router.push('/pedidos');
-        }, 3000);
       } else {
         setOrderMessage(resultado.message || 'Error al procesar el pedido');
       }
@@ -90,6 +98,58 @@ export default function CartPage() {
               : 'bg-green-100 text-green-700 border border-green-300'
           }`}>
             {orderMessage}
+          </div>
+        )}
+        
+        {/* Modal QR Code */}
+        {showQR && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold mb-4 text-green-600">¡Pedido Confirmado!</h2>
+                <p className="text-gray-600 mb-6">
+                  Tu pedido ha sido reservado. Presenta este código QR al momento de recoger tu pedido.
+                </p>
+                
+                <div className="bg-white p-4 rounded-lg border-2 border-gray-200 mb-6">
+                  <img 
+                    src={qrCodeUrl} 
+                    alt="Código QR del pedido" 
+                    className="mx-auto w-48 h-48"
+                  />
+                </div>
+                
+                <div className="space-y-2 mb-6">
+                  <p className="text-sm text-gray-600">
+                    <strong>Total a pagar:</strong> ${totalPrice.toFixed(2)}
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    <strong>Método de pago:</strong> Efectivo
+                  </p>
+                </div>
+                
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setShowQR(false);
+                      router.push('/pedidos');
+                    }}
+                    className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Ver Mis Pedidos
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowQR(false);
+                      router.push('/productos');
+                    }}
+                    className="flex-1 bg-gray-600 text-white py-2 px-4 rounded-lg hover:bg-gray-700 transition-colors"
+                  >
+                    Seguir Comprando
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
         
@@ -152,20 +212,14 @@ export default function CartPage() {
             {/* Método de pago */}
             <div className="bg-white rounded-lg shadow-md p-6">
               <h3 className="text-lg font-semibold mb-4">Método de Pago</h3>
-              <div className="flex gap-4">
-                {(['efectivo', 'tarjeta', 'transferencia'] as const).map(metodo => (
-                  <label key={metodo} className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="metodoPago"
-                      value={metodo}
-                      checked={metodoPago === metodo}
-                      onChange={(e) => setMetodoPago(e.target.value as typeof metodoPago)}
-                      className="text-blue-600"
-                    />
-                    <span className="capitalize">{metodo}</span>
-                  </label>
-                ))}
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 bg-green-500 rounded-full"></div>
+                  <span className="font-medium text-green-800">Pago en Efectivo</span>
+                </div>
+                <p className="text-sm text-green-700 mt-2">
+                  El pago se realizará en efectivo al momento de recoger tu pedido.
+                </p>
               </div>
             </div>
             

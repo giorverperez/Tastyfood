@@ -113,6 +113,12 @@ export default function TfNavbar() {
                       Mi Perfil
                     </Link>
                     <Link
+                      href="/calendario"
+                      className="block rounded-lg px-3 py-2 text-sm text-[#e8eefc] transition-colors hover:bg-cyan-400/10"
+                    >
+                      Mi Calendario
+                    </Link>
+                    <Link
                       href="/pedidos"
                       className="block rounded-lg px-3 py-2 text-sm text-[#e8eefc] transition-colors hover:bg-cyan-400/10"
                     >
@@ -172,6 +178,13 @@ export default function TfNavbar() {
                   className="rounded-lg px-3 py-2 text-sm text-[#e8eefc] transition-colors hover:bg-cyan-400/10"
                 >
                   Mi Perfil
+                </Link>
+                <Link
+                  href="/calendario"
+                  onClick={() => setMobileOpen(false)}
+                  className="rounded-lg px-3 py-2 text-sm text-[#e8eefc] transition-colors hover:bg-cyan-400/10"
+                >
+                  Mi Calendario
                 </Link>
                 <Link
                   href="/pedidos"

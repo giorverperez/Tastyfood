@@ -2,48 +2,49 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import Layout from '@/components/Layout';
+import Link from 'next/link';
+import { ArrowLeft, Minus, Plus, ShoppingCart } from 'lucide-react';
+import TfLayout from '@/components/TfLayout';
 import { useCart } from '@/context/CartContext';
 import { productosService, type Producto } from '@/lib/database';
 import { useAuth } from '@/context/AuthContext';
 
 interface ProductoDetallado extends Producto {
-  imagen_url?: string;
-  stock_disponible?: number;
+  stock_disponible: number;
 }
-
-
 
 export default function ProductDetailPage() {
   const params = useParams();
   const router = useRouter();
   const productId = params.id as string;
-  const { addItem } = useCart();
+  const { addItem, loading: cartLoading } = useCart();
   const { user } = useAuth();
-  
+
   const [product, setProduct] = useState<ProductoDetallado | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
+  const [mensaje, setMensaje] = useState<string | null>(null);
+  const [agregando, setAgregando] = useState(false);
 
   useEffect(() => {
     const loadProduct = async () => {
       try {
         setLoading(true);
         const productData = await productosService.obtenerPorId(parseInt(productId));
-        
+
         if (!productData) {
           setError('Producto no encontrado');
           return;
         }
 
-        // Usar la función que obtiene producto con stock
-        const productoConStock = await productosService.obtenerPorIdConStock(productData.id);
-        
+        const productoConStock = await productosService.obtenerPorIdConStock(
+          productData.id
+        );
+
         setProduct({
           ...productData,
-          imagen_url: productData.imagen_url || '/api/placeholder/400/300',
-          stock_disponible: productoConStock?.stock_disponible || 0
+          stock_disponible: productoConStock?.stock_disponible ?? 0,
         });
       } catch (err) {
         console.error('Error al cargar producto:', err);
@@ -58,160 +59,181 @@ export default function ProductDetailPage() {
     }
   }, [productId]);
 
+  const handleAddToCart = async () => {
+    if (!product) return;
+
+    if (!user) {
+      // Antes apuntaba a '/auth/login', una ruta que no existe en este
+      // proyecto: el enlace daba 404 en vez de llevar al inicio de sesión.
+      router.push('/login');
+      return;
+    }
+
+    if (product.stock_disponible < quantity) {
+      setMensaje('No hay suficiente stock disponible');
+      setTimeout(() => setMensaje(null), 3000);
+      return;
+    }
+
+    try {
+      setAgregando(true);
+      const result = await addItem({
+        id: product.id,
+        name: product.nombre,
+        price: product.precio,
+        quantity,
+      });
+
+      setMensaje(
+        result.success
+          ? `${quantity} × ${product.nombre} agregado al carrito`
+          : result.message || 'Error al agregar al carrito'
+      );
+    } catch {
+      setMensaje('Error al agregar al carrito');
+    } finally {
+      setAgregando(false);
+      setTimeout(() => setMensaje(null), 3000);
+    }
+  };
+
+  const handleQuantityChange = (newQuantity: number) => {
+    if (!product) return;
+    if (newQuantity >= 1 && newQuantity <= product.stock_disponible) {
+      setQuantity(newQuantity);
+    }
+  };
+
   if (loading) {
     return (
-      <Layout>
-        <div className="flex justify-center items-center min-h-screen">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
-        </div>
-      </Layout>
+      <TfLayout>
+        <div className="tf-glass h-96 animate-pulse" />
+      </TfLayout>
     );
   }
 
   if (error || !product) {
     return (
-      <Layout>
-        <div className="text-center py-12">
-          <h1 className="text-2xl font-bold text-gray-800 mb-4">
+      <TfLayout>
+        <div className="tf-glass p-14 text-center">
+          <h1 className="mb-6 text-2xl font-bold">
             {error || 'Producto no encontrado'}
           </h1>
-          <button
-            onClick={() => router.back()}
-            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
-          >
-            Volver
-          </button>
+          <Link href="/productos" className="tf-btn tf-btn-primary">
+            <ArrowLeft size={16} />
+            Volver al menú
+          </Link>
         </div>
-      </Layout>
+      </TfLayout>
     );
   }
 
-  const handleAddToCart = () => {
-    if (!user) {
-      router.push('/auth/login');
-      return;
-    }
-
-    if (product.stock_disponible && product.stock_disponible < quantity) {
-      alert('No hay suficiente stock disponible');
-      return;
-    }
-
-    addItem({
-      id: product.id,
-      name: product.nombre,
-      price: product.precio,
-      quantity: quantity
-    });
-
-    alert('Producto agregado al carrito');
-  };
-
-  const handleQuantityChange = (newQuantity: number) => {
-    if (newQuantity >= 1 && (!product.stock_disponible || newQuantity <= product.stock_disponible)) {
-      setQuantity(newQuantity);
-    }
-  };
+  const agotado = product.stock_disponible === 0;
+  const esError =
+    mensaje?.includes('Error') || mensaje?.includes('suficiente');
 
   return (
-    <Layout>
-      <div className="max-w-4xl mx-auto py-8">
-        <div className="bg-white rounded-lg shadow-md overflow-hidden">
-          <div className="md:flex">
-            <div className="md:flex-shrink-0">
-              <div className="h-64 w-full md:w-96 bg-gray-300 relative">
-                <img
-                  src={product.imagen_url}
-                  alt={product.nombre}
-                  className="w-full h-full object-cover"
-                  onError={(e) => {
-                    const target = e.target as HTMLImageElement;
-                    target.src = '/api/placeholder/400/300';
-                  }}
-                />
-              </div>
-            </div>
-            <div className="p-8">
-              <div className="uppercase tracking-wide text-sm text-blue-600 font-semibold">
-                {product.seccion?.nombre || 'Producto'}
-              </div>
-              <h1 className="mt-2 text-3xl font-bold text-gray-900">{product.nombre}</h1>
-              <p className="mt-4 text-gray-600">{product.descripcion}</p>
-              
-              {product.stock_disponible !== undefined && (
-                <div className="mt-4">
-                  <span className={`inline-block px-2 py-1 rounded-full text-sm ${
-                    product.stock_disponible > 0 
-                      ? 'bg-green-100 text-green-800' 
-                      : 'bg-red-100 text-red-800'
-                  }`}>
-                    {product.stock_disponible > 0 
-                      ? `Disponible hoy: ${product.stock_disponible}` 
-                      : 'Sin stock para hoy'
-                    }
-                  </span>
-                </div>
-              )}
-              
-              {/* Información adicional del producto se puede agregar aquí cuando esté disponible en la BD */}
+    <TfLayout>
+      <Link
+        href="/productos"
+        className="mb-7 inline-flex items-center gap-2 text-sm text-[#8fa0c4] transition-colors hover:text-cyan-300"
+      >
+        <ArrowLeft size={15} />
+        Volver al menú
+      </Link>
 
-              <div className="mt-8">
-                <div className="flex items-center justify-between mb-4">
-                  <span className="text-2xl font-bold text-gray-900">
-                    ${product.precio.toFixed(2)}
-                  </span>
-                  
-                  {product.stock_disponible && product.stock_disponible > 0 && (
-                    <div className="flex items-center space-x-2">
-                      <label className="text-sm font-medium text-gray-700">Cantidad:</label>
-                      <div className="flex items-center border rounded-md">
-                        <button
-                          onClick={() => handleQuantityChange(quantity - 1)}
-                          className="px-3 py-1 text-gray-600 hover:bg-gray-100"
-                          disabled={quantity <= 1}
-                        >
-                          -
-                        </button>
-                        <span className="px-3 py-1 border-x">{quantity}</span>
-                        <button
-                          onClick={() => handleQuantityChange(quantity + 1)}
-                          className="px-3 py-1 text-gray-600 hover:bg-gray-100"
-                          disabled={product.stock_disponible ? quantity >= product.stock_disponible : false}
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                
-                <div className="flex space-x-4">
-                  <button
-                    onClick={() => router.back()}
-                    className="bg-gray-500 text-white px-6 py-3 rounded-md hover:bg-gray-600 transition-colors"
-                  >
-                    Volver
-                  </button>
-                  
-                  <button
-                      onClick={handleAddToCart}
-                      disabled={!product.stock_disponible || product.stock_disponible === 0}
-                      className={`px-6 py-3 rounded-md transition-colors ${
-                        product.stock_disponible && product.stock_disponible > 0
-                          ? 'bg-blue-600 text-white hover:bg-blue-700'
-                          : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                      }`}
-                    >
-                      {!user ? 'Iniciar Sesión para Comprar' : 
-                       (!product.stock_disponible || product.stock_disponible === 0) ? 'Sin stock para hoy' : 
-                       `Agregar ${quantity} al carrito`}
-                    </button>
-                </div>
+      {mensaje && (
+        <div
+          role="status"
+          className={`mb-6 rounded-xl border px-5 py-3.5 text-sm ${
+            esError
+              ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
+              : 'border-lime-400/30 bg-lime-400/10 text-lime-200'
+          }`}
+        >
+          {mensaje}
+        </div>
+      )}
+
+      <div className="tf-glass tf-glass-edge overflow-hidden md:flex">
+        <div className="relative h-72 shrink-0 bg-gradient-to-br from-[#0e1530] to-[#04060f] md:h-auto md:w-2/5">
+          {product.imagen_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={product.imagen_url}
+              alt={product.nombre}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span className="grid h-full w-full place-items-center text-7xl opacity-30">
+              🍽️
+            </span>
+          )}
+
+          <span
+            className={`absolute right-4 top-4 rounded-full px-3 py-1.5 text-xs font-semibold backdrop-blur-md ${
+              agotado ? 'bg-rose-500/20 text-rose-200' : 'bg-lime-400/20 text-lime-200'
+            }`}
+          >
+            {agotado
+              ? 'Sin stock para hoy'
+              : `Disponible hoy: ${product.stock_disponible}`}
+          </span>
+        </div>
+
+        <div className="flex-1 p-8 md:p-10">
+          <span className="text-xs font-semibold uppercase tracking-widest text-cyan-300">
+            {product.seccion?.nombre || 'Producto'}
+          </span>
+          <h1 className="mt-2.5 text-3xl font-bold md:text-4xl">{product.nombre}</h1>
+          <p className="mt-4 leading-relaxed text-[#8fa0c4]">{product.descripcion}</p>
+
+          <div className="mt-9 flex flex-wrap items-center justify-between gap-5">
+            <span className="text-3xl font-bold text-[#e8eefc]">
+              ${product.precio.toFixed(2)}
+            </span>
+
+            {!agotado && (
+              <div className="flex items-center gap-1 rounded-xl border border-cyan-400/20 p-1">
+                <button
+                  onClick={() => handleQuantityChange(quantity - 1)}
+                  disabled={quantity <= 1}
+                  aria-label="Reducir cantidad"
+                  className="grid h-9 w-9 place-items-center rounded-lg text-[#8fa0c4] transition-colors hover:bg-cyan-400/10 hover:text-cyan-300 disabled:opacity-40"
+                >
+                  <Minus size={15} />
+                </button>
+                <span className="w-10 text-center font-semibold text-[#e8eefc]">
+                  {quantity}
+                </span>
+                <button
+                  onClick={() => handleQuantityChange(quantity + 1)}
+                  disabled={quantity >= product.stock_disponible}
+                  aria-label="Aumentar cantidad"
+                  className="grid h-9 w-9 place-items-center rounded-lg text-[#8fa0c4] transition-colors hover:bg-cyan-400/10 hover:text-cyan-300 disabled:opacity-40"
+                >
+                  <Plus size={15} />
+                </button>
               </div>
-            </div>
+            )}
           </div>
+
+          <button
+            onClick={handleAddToCart}
+            disabled={agotado || agregando || cartLoading}
+            className="tf-btn tf-btn-primary mt-8 w-full"
+          >
+            <ShoppingCart size={17} />
+            {agregando
+              ? 'Agregando...'
+              : !user
+                ? 'Iniciar sesión para comprar'
+                : agotado
+                  ? 'Sin stock para hoy'
+                  : `Agregar ${quantity} al carrito`}
+          </button>
         </div>
       </div>
-    </Layout>
+    </TfLayout>
   );
 }

@@ -29,9 +29,6 @@ export default function Navbar() {
             <Link href="/nosotros" className="font-medium hover:text-blue-600 transition-colors">
               Nosotros
             </Link>
-            <Link href="/ubicaciones" className="font-medium hover:text-blue-600 transition-colors">
-              Ubicaciones
-            </Link>
             <Link href="/contacto" className="font-medium hover:text-blue-600 transition-colors">
               Contacto
             </Link>

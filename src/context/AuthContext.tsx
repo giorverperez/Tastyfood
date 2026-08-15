@@ -17,7 +17,8 @@ type AuthContextType = {
   user: User | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, profileData: UserProfile) => Promise<void>;
+  /** Devuelve true si Supabase exige confirmar el correo antes de entrar. */
+  signUp: (email: string, password: string, profileData: UserProfile) => Promise<boolean>;
   signOut: () => Promise<void>;
 };
 
@@ -67,31 +68,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUp = async (email: string, password: string, profileData: UserProfile) => {
     try {
+      // El perfil NO se inserta desde aquí: la confirmación de correo está
+      // activada, así que tras signUp todavía no hay sesión y cualquier insert
+      // se rechazaría por RLS. Los datos viajan como metadata y el trigger
+      // `on_auth_user_created` crea la fila en `profiles` con role 'customer'.
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          data: { ...profileData },
+        },
       });
-      
+
       if (error) {
         console.error("Error de registro:", error.message);
         throw error;
       }
 
-      // Create user profile if registration was successful and user exists
-      if (data.user && profileData) {
-        const { error: profileError } = await supabase
-          .from('user_profiles')
-          .insert({
-            user_id: data.user.id,
-            email: data.user.email,
-            ...profileData
-          });
-        
-        if (profileError) {
-          console.error("Error creating profile:", profileError.message);
-          // Don't throw here as the user account was created successfully
-        }
-      }
+      // Sin sesión = Supabase envió un correo de confirmación.
+      return !data.session;
     } catch (err: unknown) {
       console.error("Error inesperado en registro:", err);
       throw err;

@@ -1,12 +1,23 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useAuth } from '@/context/AuthContext';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Mail, Phone, Calendar, MapPin, Edit2, Save, X, Menu, ShoppingCart } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
-import { useCart } from '@/context/CartContext';
+import {
+  Calendar,
+  Edit2,
+  IdCard,
+  Mail,
+  MapPin,
+  Phone,
+  Save,
+  ShieldCheck,
+  User,
+  X,
+} from 'lucide-react';
+import TfLayout from '@/components/TfLayout';
+import { useAuth } from '@/context/AuthContext';
+import { supabase } from '@/lib/supabase';
 
 interface UserProfile {
   id: string;
@@ -31,41 +42,35 @@ interface Address {
   reference: string;
 }
 
+const ROLES: Record<string, string> = {
+  admin: 'Administrador',
+  employee: 'Empleado',
+  customer: 'Cliente',
+};
+
 export default function PerfilPage() {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
   const router = useRouter();
-  const { totalItems } = useCart();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [address, setAddress] = useState<Address | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [mensaje, setMensaje] = useState<string | null>(null);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [showDropdown, setShowDropdown] = useState(false);
   const [editForm, setEditForm] = useState({
     first_name: '',
     last_name: '',
     phone: '',
     street: '',
-    postal_code: ''
+    postal_code: '',
   });
 
-  useEffect(() => {
-    if (!user) {
-      router.push('/login');
-      return;
-    }
-    loadProfile();
-  }, [user, router]);
-
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async () => {
     if (!user) return;
-    
+
     try {
       setLoading(true);
-      
-      // Cargar perfil del usuario
+
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('*')
@@ -83,22 +88,23 @@ export default function PerfilPage() {
           last_name: profileData.last_name || '',
           phone: profileData.phone || '',
           street: '',
-          postal_code: ''
+          postal_code: '',
         });
 
-        // Cargar dirección si existe
+        // maybeSingle: single() responde HTTP 406 cuando no hay exactamente
+        // una fila, y no tener dirección registrada es lo normal.
         const { data: addressData, error: addressError } = await supabase
           .from('addresses')
           .select('*')
           .eq('user_id', user.id)
-          .single();
+          .maybeSingle();
 
         if (!addressError && addressData) {
           setAddress(addressData);
-          setEditForm(prev => ({
+          setEditForm((prev) => ({
             ...prev,
             street: addressData.street_address || '',
-            postal_code: addressData.reference || ''
+            postal_code: addressData.reference || '',
           }));
         }
       }
@@ -108,52 +114,54 @@ export default function PerfilPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+    loadProfile();
+  }, [user, router, loadProfile]);
 
   const handleSave = async () => {
     if (!user || !profile) return;
-    
+
     try {
       setSaving(true);
-      
-      // Actualizar perfil
+
       const { error: profileError } = await supabase
         .from('profiles')
         .update({
           first_name: editForm.first_name,
           last_name: editForm.last_name,
           phone: editForm.phone,
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
         })
         .eq('id', user.id);
 
       if (profileError) throw profileError;
 
-      // Actualizar o crear dirección si se proporcionó información
       if (editForm.street) {
         if (address) {
-          // Actualizar dirección existente
           const { error: addressError } = await supabase
             .from('addresses')
             .update({
               street_address: editForm.street,
-              reference: editForm.postal_code
+              reference: editForm.postal_code,
             })
             .eq('id', address.id);
 
           if (addressError) throw addressError;
         } else {
-          // Crear nueva dirección
-          const { error: addressError } = await supabase
-            .from('addresses')
-            .insert({
-              user_id: user.id,
-              street_address: editForm.street,
-              reference: editForm.postal_code,
-              country_id: 1, // Default Ecuador
-              province_id: 1, // Default
-              canton_id: 1 // Default
-            });
+          const { error: addressError } = await supabase.from('addresses').insert({
+            user_id: user.id,
+            street_address: editForm.street,
+            reference: editForm.postal_code,
+            country_id: 1,
+            province_id: 1,
+            canton_id: 1,
+          });
 
           if (addressError) throw addressError;
         }
@@ -171,357 +179,247 @@ export default function PerfilPage() {
     }
   };
 
+  if (!user) return null;
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Cargando perfil...</p>
+      <TfLayout>
+        <div className="mx-auto max-w-3xl space-y-6">
+          <div className="tf-glass h-40 animate-pulse" />
+          <div className="tf-glass h-80 animate-pulse" />
         </div>
-      </div>
+      </TfLayout>
     );
   }
 
+  const nombreCompleto =
+    [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') ||
+    'Sin nombre registrado';
+
+  const iniciales =
+    [profile?.first_name?.[0], profile?.last_name?.[0]].filter(Boolean).join('') || '?';
+
+  const esError = mensaje?.includes('Error');
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-lg py-4">
-        <nav className="container mx-auto px-4">
-          <div className="flex justify-between items-center">
-            <Link href="/" className="flex items-center space-x-2 text-2xl font-bold text-blue-600">
-              <span className="text-3xl">🍔</span>
-              <span>TastyFood</span>
-            </Link>
-            
-            {/* Menú de escritorio */}
-            <div className="hidden md:flex items-center space-x-8">
-              <Link href="/productos" className="font-medium hover:text-blue-600 transition-colors">
-                Menú
-              </Link>
-              <Link href="/nosotros" className="font-medium hover:text-blue-600 transition-colors">
-                Nosotros
-              </Link>
-              <Link href="/ubicaciones" className="font-medium hover:text-blue-600 transition-colors">
-                Ubicaciones
-              </Link>
-              <Link href="/contacto" className="font-medium hover:text-blue-600 transition-colors">
-                Contacto
-              </Link>
-              <Link href="/carrito" className="relative flex items-center font-medium hover:text-blue-600 transition-colors">
-                <ShoppingCart className="mr-1" size={18} />
-                Carrito
-                {totalItems > 0 && (
-                  <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                    {totalItems}
-                  </span>
-                )}
-              </Link>
-              {user ? (
-                <div 
-                  className="relative"
-                  onMouseEnter={() => setShowDropdown(true)}
-                  onMouseLeave={() => setShowDropdown(false)}
-                >
-                  <button className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors flex items-center gap-1">
-                    Mi Cuenta
-                  </button>
-                  {showDropdown && (
-                    <div className="absolute right-0 top-full w-48 bg-transparent rounded-md shadow-lg z-10">
-                      <Link href="/perfil" className="block bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                        Mi Perfil
-                      </Link>
-                      <Link href="/pedidos" className="block bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                        Mis Pedidos
-                      </Link>
-                      <button 
-                         onClick={async () => {
-                           await signOut();
-                           router.push('/');
-                         }}
-                         className="block bg-red-600 w-full text-left px-4 py-2 text-sm text-white hover:bg-red-700 transition-colors rounded-b-lg"
-                       >
-                         Cerrar Sesión
-                       </button>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <Link
-                  href="/login"
-                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
-                >
-                  Iniciar Sesión
-                </Link>
-              )}
-            </div>
-            
-            {/* Botón de menú móvil */}
-            <button 
-              className="md:hidden text-gray-700"
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            >
-              {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
-            </button>
-          </div>
-          
-          {/* Menú móvil */}
-          {mobileMenuOpen && (
-            <div className="md:hidden absolute top-full left-0 right-0 bg-white border-t border-gray-200 shadow-lg">
-              <div className="flex flex-col p-4 space-y-4">
-                <Link 
-                  href="/productos" 
-                  className="font-medium hover:text-blue-600 transition-colors"
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  Menú
-                </Link>
-                <Link 
-                  href="/nosotros" 
-                  className="font-medium hover:text-blue-600 transition-colors"
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  Nosotros
-                </Link>
-                <Link 
-                  href="/ubicaciones" 
-                  className="font-medium hover:text-blue-600 transition-colors"
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  Ubicaciones
-                </Link>
-                <Link 
-                  href="/contacto" 
-                  className="font-medium hover:text-blue-600 transition-colors"
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  Contacto
-                </Link>
-                <Link 
-                  href="/carrito" 
-                  className="flex items-center font-medium hover:text-blue-600 transition-colors"
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  <ShoppingCart className="mr-1" size={18} />
-                  Carrito {totalItems > 0 && `(${totalItems})`}
-                </Link>
-                {user ? (
-                  <div className="space-y-2">
-                    <Link href="/perfil" className="block font-medium hover:text-blue-600 transition-colors">
-                      Mi Perfil
-                    </Link>
-                    <Link href="/pedidos" className="block font-medium hover:text-blue-600 transition-colors">
-                      Mis Pedidos
-                    </Link>
-                    <button 
-                      onClick={async () => {
-                        await signOut();
-                        router.push('/');
-                      }}
-                      className="block bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 transition-colors"
-                    >
-                      Cerrar Sesión
-                    </button>
-                  </div>
-                ) : (
-                  <Link
-                    href="/login"
-                    className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors text-center"
-                    onClick={() => setMobileMenuOpen(false)}
-                  >
-                    Iniciar Sesión
-                  </Link>
-                )}
-              </div>
-            </div>
-          )}
-        </nav>
-      </header>
+    <TfLayout>
+      <div className="mx-auto max-w-3xl">
+        <h1 className="mb-8 text-3xl font-bold md:text-4xl">
+          Mi <span className="tf-gradient-text">Perfil</span>
+        </h1>
 
-      <div className="container mx-auto px-4 max-w-4xl py-8">
-        {/* Header */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center">
-                <User className="text-white" size={32} />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">
-                  {profile ? `${profile.first_name} ${profile.last_name}` : 'Mi Perfil'}
-                </h1>
-                <p className="text-gray-600">{user?.email}</p>
-              </div>
-            </div>
-            <button
-              onClick={() => {
-                if (editing) {
-                  setEditing(false);
-                  setEditForm({
-                    first_name: profile?.first_name || '',
-                    last_name: profile?.last_name || '',
-                    phone: profile?.phone || '',
-                    street: address?.street_address || '',
-                    postal_code: address?.reference || ''
-                  });
-                } else {
-                  setEditing(true);
-                }
-              }}
-              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-            >
-              {editing ? <X size={16} /> : <Edit2 size={16} />}
-              <span>{editing ? 'Cancelar' : 'Editar'}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Mensaje */}
         {mensaje && (
-          <div className={`mb-6 p-4 rounded-lg ${mensaje.includes('Error') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+          <div
+            role="status"
+            className={`mb-6 rounded-xl border px-5 py-3.5 text-sm ${
+              esError
+                ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
+                : 'border-lime-400/30 bg-lime-400/10 text-lime-200'
+            }`}
+          >
             {mensaje}
           </div>
         )}
 
-        {/* Información Personal */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4 flex items-center">
-            <User className="mr-2" size={20} />
-            Información Personal
-          </h2>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Nombre
-              </label>
-              {editing ? (
-                <input
-                  type="text"
-                  value={editForm.first_name}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, first_name: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              ) : (
-                <p className="text-gray-900">{profile?.first_name || 'No especificado'}</p>
-              )}
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Apellido
-              </label>
-              {editing ? (
-                <input
-                  type="text"
-                  value={editForm.last_name}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, last_name: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              ) : (
-                <p className="text-gray-900">{profile?.last_name || 'No especificado'}</p>
-              )}
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
-                <Mail className="mr-1" size={16} />
-                Email
-              </label>
-              <p className="text-gray-900">{user?.email}</p>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
-                <Phone className="mr-1" size={16} />
-                Teléfono
-              </label>
-              {editing ? (
-                <input
-                  type="tel"
-                  value={editForm.phone}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, phone: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              ) : (
-                <p className="text-gray-900">{profile?.phone || 'No especificado'}</p>
-              )}
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Cédula/RUC
-              </label>
-              <p className="text-gray-900">{profile?.cedula_ruc || 'No especificado'}</p>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
-                <Calendar className="mr-1" size={16} />
-                Fecha de Nacimiento
-              </label>
-              <p className="text-gray-900">
-                {profile?.birth_date ? new Date(profile.birth_date).toLocaleDateString() : 'No especificado'}
-              </p>
-            </div>
+        {!profile ? (
+          <div className="tf-glass p-14 text-center">
+            <p className="mb-7 text-[#8fa0c4]">
+              Todavía no encontramos tu perfil. Vuelve a iniciar sesión y, si el
+              problema sigue, avisa al administrador.
+            </p>
+            <Link href="/productos" className="tf-btn tf-btn-primary">
+              Ir al menú
+            </Link>
           </div>
-        </div>
+        ) : (
+          <div className="space-y-6">
+            {/* Cabecera */}
+            <div className="tf-glass tf-glass-edge flex flex-wrap items-center gap-6 p-7">
+              <span className="grid h-20 w-20 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-cyan-400 to-violet-500 text-2xl font-bold uppercase text-[#04060f]">
+                {iniciales}
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="truncate text-2xl font-bold text-[#e8eefc]">
+                  {nombreCompleto}
+                </h2>
+                <p className="mt-1 truncate text-sm text-[#8fa0c4]">{user.email}</p>
+                <span className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-xs font-semibold text-cyan-200">
+                  <ShieldCheck size={12} />
+                  {ROLES[profile.role] ?? profile.role}
+                </span>
+              </div>
 
-        {/* Dirección */}
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-xl font-semibold mb-4 flex items-center">
-            <MapPin className="mr-2" size={20} />
-            Dirección
-          </h2>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Calle
-              </label>
-              {editing ? (
-                <input
-                  type="text"
-                  value={editForm.street}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, street: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              ) : (
-                <p className="text-gray-900">{address?.street_address || 'No especificado'}</p>
+              {!editing && (
+                <button
+                  onClick={() => setEditing(true)}
+                  className="tf-btn tf-btn-ghost !px-4 !py-2 text-sm"
+                >
+                  <Edit2 size={15} />
+                  Editar
+                </button>
               )}
             </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Referencia
-              </label>
+
+            {/* Datos */}
+            <div className="tf-glass tf-glass-edge p-7 md:p-8">
+              <h3 className="mb-6 text-lg font-bold">Datos personales</h3>
+
               {editing ? (
-                <input
-                  type="text"
-                  value={editForm.postal_code}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, postal_code: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Ej: Cerca del parque, frente a la farmacia"
-                />
+                <div className="space-y-5">
+                  <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                    <div>
+                      <label
+                        htmlFor="first_name"
+                        className="mb-2 block text-sm text-[#8fa0c4]"
+                      >
+                        Nombre
+                      </label>
+                      <input
+                        id="first_name"
+                        className="tf-input"
+                        value={editForm.first_name}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, first_name: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="last_name"
+                        className="mb-2 block text-sm text-[#8fa0c4]"
+                      >
+                        Apellido
+                      </label>
+                      <input
+                        id="last_name"
+                        className="tf-input"
+                        value={editForm.last_name}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, last_name: e.target.value })
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label htmlFor="phone" className="mb-2 block text-sm text-[#8fa0c4]">
+                      Teléfono
+                    </label>
+                    <input
+                      id="phone"
+                      type="tel"
+                      className="tf-input"
+                      value={editForm.phone}
+                      onChange={(e) =>
+                        setEditForm({ ...editForm, phone: e.target.value })
+                      }
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                    <div>
+                      <label
+                        htmlFor="street"
+                        className="mb-2 block text-sm text-[#8fa0c4]"
+                      >
+                        Dirección
+                      </label>
+                      <input
+                        id="street"
+                        className="tf-input"
+                        value={editForm.street}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, street: e.target.value })
+                        }
+                        placeholder="Calle y número"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="reference"
+                        className="mb-2 block text-sm text-[#8fa0c4]"
+                      >
+                        Referencia
+                      </label>
+                      <input
+                        id="reference"
+                        className="tf-input"
+                        value={editForm.postal_code}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, postal_code: e.target.value })
+                        }
+                        placeholder="Punto de referencia"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-3 pt-2 sm:flex-row">
+                    <button
+                      onClick={handleSave}
+                      disabled={saving}
+                      className="tf-btn tf-btn-primary flex-1"
+                    >
+                      <Save size={16} />
+                      {saving ? 'Guardando...' : 'Guardar cambios'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEditing(false);
+                        loadProfile();
+                      }}
+                      disabled={saving}
+                      className="tf-btn tf-btn-ghost flex-1"
+                    >
+                      <X size={16} />
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
               ) : (
-                <p className="text-gray-900">{address?.reference || 'No especificado'}</p>
+                <dl className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                  {[
+                    { Icon: User, label: 'Nombre completo', value: nombreCompleto },
+                    { Icon: Mail, label: 'Correo', value: user.email },
+                    { Icon: Phone, label: 'Teléfono', value: profile.phone },
+                    { Icon: IdCard, label: 'Cédula / RUC', value: profile.cedula_ruc },
+                    {
+                      Icon: MapPin,
+                      label: 'Dirección',
+                      value: address?.street_address,
+                    },
+                    {
+                      Icon: Calendar,
+                      label: 'Miembro desde',
+                      value: profile.created_at
+                        ? new Date(profile.created_at).toLocaleDateString('es-ES', {
+                            month: 'long',
+                            year: 'numeric',
+                          })
+                        : null,
+                    },
+                  ].map(({ Icon, label, value }) => (
+                    <div key={label} className="flex items-start gap-3.5">
+                      <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-cyan-400/10 text-cyan-300">
+                        <Icon size={16} />
+                      </span>
+                      <div className="min-w-0">
+                        <dt className="text-xs uppercase tracking-wider text-[#5b6b8f]">
+                          {label}
+                        </dt>
+                        <dd className="mt-0.5 break-words text-[#e8eefc]">
+                          {value || (
+                            <span className="text-[#5b6b8f]">No registrado</span>
+                          )}
+                        </dd>
+                      </div>
+                    </div>
+                  ))}
+                </dl>
               )}
             </div>
           </div>
-          
-          {editing && (
-            <div className="mt-6 flex justify-end">
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex items-center space-x-2 px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors disabled:bg-gray-400"
-              >
-                <Save size={16} />
-                <span>{saving ? 'Guardando...' : 'Guardar Cambios'}</span>
-              </button>
-            </div>
-          )}
-        </div>
+        )}
       </div>
-    </div>
+    </TfLayout>
   );
 }

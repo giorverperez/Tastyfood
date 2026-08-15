@@ -445,12 +445,19 @@ export const facturasService = {
     
     if (error) throw error;
     
-    // Transformar los datos para que coincidan con la estructura esperada
+    // Transformar los datos para que coincidan con la estructura esperada.
+    // `productos` viene como objeto cuando la relación es uno-a-uno, pero sin
+    // tipos generados TypeScript lo infiere como arreglo: se aceptan ambos.
+    const nombreProducto = (relacion: unknown): string => {
+      const producto = Array.isArray(relacion) ? relacion[0] : relacion;
+      return (producto as { nombre?: string } | null)?.nombre ?? '';
+    };
+
     const facturas = (data || []).map(factura => ({
       ...factura,
       productos: factura.factura_detalles?.map(detalle => ({
         producto_id: detalle.producto_id,
-        producto_nombre: detalle.productos?.nombre || '',
+        producto_nombre: nombreProducto(detalle.productos),
         cantidad: detalle.cantidad,
         precio_unitario: detalle.precio_unitario,
         precio_total: detalle.precio_total
@@ -544,8 +551,8 @@ export const imagenesService = {
 // Tipos para payloads de sincronización
 export interface PayloadCambio {
   eventType: 'INSERT' | 'UPDATE' | 'DELETE';
-  new?: Record<string, any>;
-  old?: Record<string, any>;
+  new?: Record<string, unknown>;
+  old?: Record<string, unknown>;
   schema: string;
   table: string;
 }

@@ -1,21 +1,36 @@
 'use client';
 
-import Layout from '@/components/Layout';
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { Banknote, CheckCircle2, Minus, Plus, ShoppingBag, Trash2 } from 'lucide-react';
+import TfLayout from '@/components/TfLayout';
 import { useCart } from '@/context/CartContext';
 import { useAuth } from '@/context/AuthContext';
-import { useRouter } from 'next/navigation';
-import { useState } from 'react';
 import { facturasService, ProductoCarrito } from '@/lib/database';
 import QRCode from 'qrcode';
 
 export default function CartPage() {
-  const { items, removeItem, updateQuantity, totalPrice, verificarDisponibilidad, clearCart, loading: cartLoading } = useCart();
+  const {
+    items,
+    removeItem,
+    updateQuantity,
+    totalPrice,
+    verificarDisponibilidad,
+    clearCart,
+    loading: cartLoading,
+  } = useCart();
   const { user } = useAuth();
   const router = useRouter();
   const [processingOrder, setProcessingOrder] = useState(false);
   const [orderMessage, setOrderMessage] = useState<string | null>(null);
   const [showQR, setShowQR] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
+  // El total se congela antes de vaciar el carrito: el modal leía `totalPrice`,
+  // que ya valía 0 porque clearCart() se ejecuta antes de mostrarlo, así que
+  // el comprobante siempre decía "Total a pagar: $0.00".
+  const [totalConfirmado, setTotalConfirmado] = useState(0);
+  const [facturaConfirmada, setFacturaConfirmada] = useState<string>('');
 
   const handleUpdateQuantity = async (itemId: number, newQuantity: number) => {
     const result = await updateQuantity(itemId, newQuantity);
@@ -35,44 +50,49 @@ export default function CartPage() {
     setOrderMessage(null);
 
     try {
-      // Verificar disponibilidad antes de procesar
       const verificacion = await verificarDisponibilidad();
       if (!verificacion.disponible) {
-        setOrderMessage(verificacion.mensaje || 'Algunos productos no están disponibles');
+        setOrderMessage(
+          verificacion.mensaje || 'Algunos productos no están disponibles'
+        );
         return;
       }
 
-      // Preparar productos para la factura
-      const productos: ProductoCarrito[] = items.map(item => ({
+      const productos: ProductoCarrito[] = items.map((item) => ({
         id: item.id,
         name: item.name,
         price: item.price,
         quantity: item.quantity,
         producto_id: item.id,
-        cantidad: item.quantity
+        cantidad: item.quantity,
       }));
 
-      // Crear factura
+      const totalAlConfirmar = totalPrice;
+
       const resultado = await facturasService.crear({
         cliente_id: user.id,
         productos,
         metodo_pago: 'efectivo',
-        notas: 'Pedido realizado desde la aplicación web'
+        notas: 'Pedido realizado desde la aplicación web',
       });
 
       if (resultado.success) {
-        // Generar QR con información del pedido
         const qrData = JSON.stringify({
           numero_factura: resultado.numero_factura,
           total: resultado.total,
           fecha: new Date().toISOString(),
-          cliente_id: user.id
+          cliente_id: user.id,
         });
-        
-        const qrUrl = await QRCode.toDataURL(qrData);
+
+        const qrUrl = await QRCode.toDataURL(qrData, {
+          margin: 1,
+          color: { dark: '#04060f', light: '#ffffff' },
+        });
+
         setQrCodeUrl(qrUrl);
+        setTotalConfirmado(resultado.total ?? totalAlConfirmar);
+        setFacturaConfirmada(resultado.numero_factura ?? '');
         setShowQR(true);
-        setOrderMessage(`¡Pedido creado exitosamente! Número de factura: ${resultado.numero_factura}`);
         clearCart();
       } else {
         setOrderMessage(resultado.message || 'Error al procesar el pedido');
@@ -85,178 +105,210 @@ export default function CartPage() {
     }
   };
 
+  const esError =
+    orderMessage?.includes('Error') || orderMessage?.includes('insuficiente');
+
   return (
-    <Layout>
-      <div className="max-w-4xl mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold mb-8">Carrito de Compras</h1>
-        
-        {/* Mensaje de estado */}
+    <TfLayout>
+      <div className="mx-auto max-w-4xl">
+        <h1 className="mb-8 text-3xl font-bold md:text-4xl">
+          Carrito de <span className="tf-gradient-text">Compras</span>
+        </h1>
+
         {orderMessage && (
-          <div className={`mb-6 p-4 rounded-lg ${
-            orderMessage.includes('Error') || orderMessage.includes('insuficiente') 
-              ? 'bg-red-100 text-red-700 border border-red-300' 
-              : 'bg-green-100 text-green-700 border border-green-300'
-          }`}>
+          <div
+            role="status"
+            className={`mb-6 rounded-xl border px-5 py-3.5 text-sm ${
+              esError
+                ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
+                : 'border-lime-400/30 bg-lime-400/10 text-lime-200'
+            }`}
+          >
             {orderMessage}
           </div>
         )}
-        
-        {/* Modal QR Code */}
+
+        {/* Confirmación con QR */}
         {showQR && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4">
-              <div className="text-center">
-                <h2 className="text-2xl font-bold mb-4 text-green-600">¡Pedido Confirmado!</h2>
-                <p className="text-gray-600 mb-6">
-                  Tu pedido ha sido reservado. Presenta este código QR al momento de recoger tu pedido.
+          <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-sm">
+            <div className="tf-glass tf-glass-edge tf-glow-cyan w-full max-w-md p-8 text-center">
+              <span className="mx-auto mb-5 grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-cyan-400 to-lime-400 text-[#04060f]">
+                <CheckCircle2 size={26} />
+              </span>
+
+              <h2 className="mb-2.5 text-2xl font-bold">¡Pedido Confirmado!</h2>
+              <p className="mb-7 text-sm leading-relaxed text-[#8fa0c4]">
+                Presenta este código QR al momento de recoger tu pedido.
+              </p>
+
+              <div className="mx-auto mb-7 w-fit rounded-2xl bg-white p-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={qrCodeUrl} alt="Código QR del pedido" className="h-48 w-48" />
+              </div>
+
+              <div className="mb-7 space-y-2 text-sm">
+                {facturaConfirmada && (
+                  <p className="text-[#8fa0c4]">
+                    Comprobante:{' '}
+                    <span className="font-semibold text-[#e8eefc]">
+                      {facturaConfirmada}
+                    </span>
+                  </p>
+                )}
+                <p className="text-[#8fa0c4]">
+                  Total a pagar:{' '}
+                  <span className="font-semibold text-[#e8eefc]">
+                    ${totalConfirmado.toFixed(2)}
+                  </span>
                 </p>
-                
-                <div className="bg-white p-4 rounded-lg border-2 border-gray-200 mb-6">
-                  <img 
-                    src={qrCodeUrl} 
-                    alt="Código QR del pedido" 
-                    className="mx-auto w-48 h-48"
-                  />
-                </div>
-                
-                <div className="space-y-2 mb-6">
-                  <p className="text-sm text-gray-600">
-                    <strong>Total a pagar:</strong> ${totalPrice.toFixed(2)}
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    <strong>Método de pago:</strong> Efectivo
-                  </p>
-                </div>
-                
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => {
-                      setShowQR(false);
-                      router.push('/pedidos');
-                    }}
-                    className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors"
-                  >
-                    Ver Mis Pedidos
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowQR(false);
-                      router.push('/productos');
-                    }}
-                    className="flex-1 bg-gray-600 text-white py-2 px-4 rounded-lg hover:bg-gray-700 transition-colors"
-                  >
-                    Seguir Comprando
-                  </button>
-                </div>
+                <p className="text-[#8fa0c4]">Método de pago: Efectivo</p>
+              </div>
+
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <button
+                  onClick={() => {
+                    setShowQR(false);
+                    router.push('/pedidos');
+                  }}
+                  className="tf-btn tf-btn-primary flex-1"
+                >
+                  Ver Mis Pedidos
+                </button>
+                <button
+                  onClick={() => {
+                    setShowQR(false);
+                    router.push('/productos');
+                  }}
+                  className="tf-btn tf-btn-ghost flex-1"
+                >
+                  Seguir Comprando
+                </button>
               </div>
             </div>
           </div>
         )}
-        
+
         {items.length === 0 ? (
-          <div className="text-center py-8">
-            <p className="text-gray-600 text-lg">Tu carrito está vacío</p>
-            <button 
-              onClick={() => router.push('/productos')}
-              className="mt-4 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-            >
+          <div className="tf-glass p-14 text-center">
+            <ShoppingBag className="mx-auto mb-5 text-[#5b6b8f]" size={44} />
+            <p className="mb-7 text-lg text-[#8fa0c4]">Tu carrito está vacío</p>
+            <Link href="/productos" className="tf-btn tf-btn-primary">
               Ver Productos
-            </button>
+            </Link>
           </div>
         ) : (
           <div className="space-y-6">
-            {/* Items del carrito */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <div className="space-y-4">
-                {items.map(item => (
-                  <div key={item.id} className="flex items-center justify-between border-b py-4">
-                    <div className="flex-1">
-                      <h3 className="text-lg font-semibold">{item.name}</h3>
-                      <p className="text-gray-600">${item.price.toFixed(2)} c/u</p>
-                      {item.stockDisponible !== undefined && (
-                        <p className="text-sm text-gray-500">Disponible hoy: {item.stockDisponible}</p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center border rounded">
-                        <button
-                          className="px-3 py-1 hover:bg-gray-100 disabled:opacity-50"
-                          onClick={() => handleUpdateQuantity(item.id, item.quantity - 1)}
-                          disabled={cartLoading}
-                        >
-                          -
-                        </button>
-                        <span className="px-3 py-1">{item.quantity}</span>
-                        <button
-                          className="px-3 py-1 hover:bg-gray-100 disabled:opacity-50"
-                          onClick={() => handleUpdateQuantity(item.id, item.quantity + 1)}
-                          disabled={cartLoading || (item.stockDisponible !== undefined && item.quantity >= item.stockDisponible)}
-                          title={item.quantity >= (item.stockDisponible || 0) ? 'Stock máximo para hoy alcanzado' : ''}
-                        >
-                          +
-                        </button>
-                      </div>
-                      <span className="font-semibold">${(item.price * item.quantity).toFixed(2)}</span>
+            {/* Productos */}
+            <div className="tf-glass tf-glass-edge divide-y divide-cyan-400/10 p-2">
+              {items.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex flex-wrap items-center justify-between gap-4 p-5"
+                >
+                  <div className="min-w-40 flex-1">
+                    <h3 className="font-semibold text-[#e8eefc]">{item.name}</h3>
+                    <p className="mt-0.5 text-sm text-[#8fa0c4]">
+                      ${item.price.toFixed(2)} c/u
+                    </p>
+                    {item.stockDisponible !== undefined && (
+                      <p className="mt-0.5 text-xs text-[#5b6b8f]">
+                        Disponible hoy: {item.stockDisponible}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-1 rounded-xl border border-cyan-400/20 p-1">
                       <button
-                        onClick={() => removeItem(item.id)}
-                        className="text-red-500 hover:text-red-700"
+                        onClick={() => handleUpdateQuantity(item.id, item.quantity - 1)}
+                        disabled={cartLoading}
+                        aria-label="Reducir cantidad"
+                        className="grid h-8 w-8 place-items-center rounded-lg text-[#8fa0c4] transition-colors hover:bg-cyan-400/10 hover:text-cyan-300 disabled:opacity-40"
                       >
-                        Eliminar
+                        <Minus size={14} />
+                      </button>
+                      <span className="w-8 text-center text-sm font-semibold text-[#e8eefc]">
+                        {item.quantity}
+                      </span>
+                      <button
+                        onClick={() => handleUpdateQuantity(item.id, item.quantity + 1)}
+                        disabled={
+                          cartLoading ||
+                          (item.stockDisponible !== undefined &&
+                            item.quantity >= item.stockDisponible)
+                        }
+                        aria-label="Aumentar cantidad"
+                        title={
+                          item.quantity >= (item.stockDisponible || 0)
+                            ? 'Stock máximo para hoy alcanzado'
+                            : ''
+                        }
+                        className="grid h-8 w-8 place-items-center rounded-lg text-[#8fa0c4] transition-colors hover:bg-cyan-400/10 hover:text-cyan-300 disabled:opacity-40"
+                      >
+                        <Plus size={14} />
                       </button>
                     </div>
+
+                    <span className="w-20 text-right font-bold text-[#e8eefc]">
+                      ${(item.price * item.quantity).toFixed(2)}
+                    </span>
+
+                    <button
+                      onClick={() => removeItem(item.id)}
+                      aria-label={`Eliminar ${item.name}`}
+                      className="grid h-9 w-9 place-items-center rounded-lg text-rose-300 transition-colors hover:bg-rose-500/10"
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
 
             {/* Método de pago */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h3 className="text-lg font-semibold mb-4">Método de Pago</h3>
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 bg-green-500 rounded-full"></div>
-                  <span className="font-medium text-green-800">Pago en Efectivo</span>
-                </div>
-                <p className="text-sm text-green-700 mt-2">
-                  El pago se realizará en efectivo al momento de recoger tu pedido.
+            <div className="tf-glass flex items-start gap-4 p-6">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-lime-400/15 text-lime-300">
+                <Banknote size={19} />
+              </span>
+              <div>
+                <h3 className="font-semibold text-[#e8eefc]">Pago en Efectivo</h3>
+                <p className="mt-1 text-sm text-[#8fa0c4]">
+                  El pago se realizará al momento de recoger tu pedido.
                 </p>
               </div>
             </div>
-            
-            {/* Total y checkout */}
-            <div className="bg-gray-50 rounded-lg p-6">
-              <div className="flex justify-between items-center mb-4">
-                <span className="text-xl font-semibold">Total:</span>
-                <span className="text-2xl font-bold text-blue-600">${totalPrice.toFixed(2)}</span>
+
+            {/* Total */}
+            <div className="tf-glass tf-glass-edge p-7">
+              <div className="mb-6 flex items-center justify-between">
+                <span className="text-lg text-[#8fa0c4]">Total</span>
+                <span className="tf-gradient-text text-3xl font-bold">
+                  ${totalPrice.toFixed(2)}
+                </span>
               </div>
-              
+
               {user ? (
-                <button 
+                <button
                   onClick={handleCheckout}
                   disabled={processingOrder || cartLoading}
-                  className={`w-full py-3 rounded-lg text-lg font-semibold transition-colors ${
-                    processingOrder || cartLoading
-                      ? 'bg-gray-400 text-gray-600 cursor-not-allowed'
-                      : 'bg-blue-600 text-white hover:bg-blue-700'
-                  }`}
+                  className="tf-btn tf-btn-primary w-full text-base"
                 >
-                  {processingOrder ? 'Procesando Pedido...' : 'Proceder al Pago'}
+                  {processingOrder ? 'Procesando Pedido...' : 'Confirmar Pedido'}
                 </button>
               ) : (
                 <div className="text-center">
-                  <p className="text-gray-600 mb-4">Inicia sesión para continuar con tu pedido</p>
-                  <button 
-                    onClick={() => router.push('/login')}
-                    className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-                  >
+                  <p className="mb-4 text-sm text-[#8fa0c4]">
+                    Inicia sesión para continuar con tu pedido
+                  </p>
+                  <Link href="/login" className="tf-btn tf-btn-primary w-full">
                     Iniciar Sesión
-                  </button>
+                  </Link>
                 </div>
               )}
             </div>
           </div>
         )}
       </div>
-    </Layout>
+    </TfLayout>
   );
 }

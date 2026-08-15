@@ -1,28 +1,67 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import Layout from '@/components/Layout';
-import { useAuth } from '@/context/AuthContext';
+import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { QrCode, Receipt } from 'lucide-react';
+import TfLayout from '@/components/TfLayout';
+import { useAuth } from '@/context/AuthContext';
 import { facturasService, type FacturaCompleta } from '@/lib/database';
 import QRCode from 'qrcode';
 
-type EstadoFactura = 'pendiente' | 'confirmada' | 'entregada' | 'cancelada';
+/**
+ * Estados reales de la tabla `facturas`. La restricción CHECK de la base solo
+ * admite estos tres. Antes aquí se usaban 'confirmada' | 'entregada' |
+ * 'cancelada', que no existen: al marcar el admin una factura como pagada, el
+ * cliente veía el texto crudo "pagado" sin color ni traducción.
+ */
+type EstadoFactura = 'pendiente' | 'pagado' | 'cancelado';
 
-interface FacturaConDetalles extends FacturaCompleta {
-  estado_display: string;
-  metodo_pago_display: string;
-}
+const ESTADOS: Record<EstadoFactura, { label: string; className: string }> = {
+  pendiente: {
+    label: 'Pendiente',
+    className: 'bg-amber-400/15 text-amber-200 border-amber-400/30',
+  },
+  // El panel muestra 'pagado' como "entregado"; se mantiene ese lenguaje.
+  pagado: {
+    label: 'Entregado',
+    className: 'bg-lime-400/15 text-lime-200 border-lime-400/30',
+  },
+  cancelado: {
+    label: 'Cancelado',
+    className: 'bg-rose-500/15 text-rose-200 border-rose-500/30',
+  },
+};
+
+const estadoInfo = (estado: string) =>
+  ESTADOS[estado as EstadoFactura] ?? {
+    label: estado,
+    className: 'bg-white/5 text-[#8fa0c4] border-white/10',
+  };
 
 export default function OrdersPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const [facturas, setFacturas] = useState<FacturaConDetalles[]>([]);
+  const [facturas, setFacturas] = useState<FacturaCompleta[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showQR, setShowQR] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
-  const [selectedFactura, setSelectedFactura] = useState<FacturaConDetalles | null>(null);
+  const [selectedFactura, setSelectedFactura] = useState<FacturaCompleta | null>(null);
+
+  const cargarFacturas = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      setLoading(true);
+      setFacturas(await facturasService.obtenerPorUsuario(user.id));
+    } catch (err) {
+      console.error('Error al cargar facturas:', err);
+      setError('Error al cargar el historial de pedidos');
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
 
   useEffect(() => {
     if (!user) {
@@ -30,64 +69,22 @@ export default function OrdersPage() {
       return;
     }
     cargarFacturas();
-  }, [user, router]);
+  }, [user, router, cargarFacturas]);
 
-  const cargarFacturas = async () => {
-    if (!user) return;
-    
-    try {
-      setLoading(true);
-      const facturasData = await facturasService.obtenerPorUsuario(user.id);
-      
-      const facturasConDetalles: FacturaConDetalles[] = facturasData.map(factura => ({
-        ...factura,
-        estado_display: getEstadoDisplay(factura.estado as EstadoFactura),
-        metodo_pago_display: getMetodoPagoDisplay()
-      }));
-      
-      setFacturas(facturasConDetalles);
-    } catch (err) {
-      console.error('Error al cargar facturas:', err);
-      setError('Error al cargar el historial de pedidos');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getEstadoDisplay = (estado: EstadoFactura): string => {
-    const estados = {
-      'pendiente': 'Pendiente',
-      'confirmada': 'Confirmada',
-      'entregada': 'Entregada',
-      'cancelada': 'Cancelada'
-    };
-    return estados[estado] || estado;
-  };
-
-  const getMetodoPagoDisplay = (): string => {
-    return 'Efectivo';
-  };
-
-  const getEstadoColor = (estado: EstadoFactura): string => {
-    const colores = {
-      'pendiente': 'bg-yellow-100 text-yellow-800',
-      'confirmada': 'bg-blue-100 text-blue-800',
-      'entregada': 'bg-green-100 text-green-800',
-      'cancelada': 'bg-red-100 text-red-800'
-    };
-    return colores[estado] || 'bg-gray-100 text-gray-800';
-  };
-
-  const generarQR = async (factura: FacturaConDetalles) => {
+  const generarQR = async (factura: FacturaCompleta) => {
     try {
       const qrData = JSON.stringify({
         numero_factura: factura.numero_factura,
         total: factura.total,
         fecha: factura.fecha_factura,
-        cliente_id: user?.id
+        cliente_id: user?.id,
       });
-      
-      const qrUrl = await QRCode.toDataURL(qrData);
+
+      const qrUrl = await QRCode.toDataURL(qrData, {
+        margin: 1,
+        color: { dark: '#04060f', light: '#ffffff' },
+      });
+
       setQrCodeUrl(qrUrl);
       setSelectedFactura(factura);
       setShowQR(true);
@@ -96,152 +93,178 @@ export default function OrdersPage() {
     }
   };
 
-  if (!user) {
-    return null;
-  }
+  if (!user) return null;
 
   return (
-    <Layout>
-      <div className="max-w-6xl mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold mb-8">Mis Pedidos</h1>
-        
-        {/* Modal QR Code */}
+    <TfLayout>
+      <div className="mx-auto max-w-4xl">
+        <h1 className="mb-8 text-3xl font-bold md:text-4xl">
+          Mis <span className="tf-gradient-text">Pedidos</span>
+        </h1>
+
+        {/* Modal QR */}
         {showQR && selectedFactura && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4">
-              <div className="text-center">
-                <h2 className="text-2xl font-bold mb-4 text-blue-600">Código QR del Pedido</h2>
-                <p className="text-gray-600 mb-6">
-                  Presenta este código QR al momento de recoger tu pedido.
-                </p>
-                
-                <div className="bg-white p-4 rounded-lg border-2 border-gray-200 mb-6">
-                  <img 
-                    src={qrCodeUrl} 
-                    alt="Código QR del pedido" 
-                    className="mx-auto w-48 h-48"
-                  />
-                </div>
-                
-                <div className="space-y-2 mb-6">
-                  <p className="text-sm text-gray-600">
-                    <strong>Pedido:</strong> #{selectedFactura.numero_factura}
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    <strong>Total:</strong> ${selectedFactura.total.toFixed(2)}
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    <strong>Estado:</strong> {selectedFactura.estado_display}
-                  </p>
-                </div>
-                
-                <button
-                  onClick={() => setShowQR(false)}
-                  className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  Cerrar
-                </button>
+          <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-sm">
+            <div className="tf-glass tf-glass-edge tf-glow-cyan w-full max-w-md p-8 text-center">
+              <h2 className="mb-2.5 text-2xl font-bold">Código QR del Pedido</h2>
+              <p className="mb-7 text-sm text-[#8fa0c4]">
+                Presenta este código al momento de recoger tu pedido.
+              </p>
+
+              <div className="mx-auto mb-7 w-fit rounded-2xl bg-white p-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={qrCodeUrl} alt="Código QR del pedido" className="h-48 w-48" />
               </div>
+
+              <div className="mb-7 space-y-2 text-sm text-[#8fa0c4]">
+                <p>
+                  Pedido:{' '}
+                  <span className="font-semibold text-[#e8eefc]">
+                    #{selectedFactura.numero_factura}
+                  </span>
+                </p>
+                <p>
+                  Total:{' '}
+                  <span className="font-semibold text-[#e8eefc]">
+                    ${selectedFactura.total.toFixed(2)}
+                  </span>
+                </p>
+                <p>
+                  Estado:{' '}
+                  <span className="font-semibold text-[#e8eefc]">
+                    {estadoInfo(selectedFactura.estado).label}
+                  </span>
+                </p>
+              </div>
+
+              <button
+                onClick={() => setShowQR(false)}
+                className="tf-btn tf-btn-primary w-full"
+              >
+                Cerrar
+              </button>
             </div>
           </div>
         )}
-        
+
         {loading ? (
-          <div className="text-center py-8">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Cargando pedidos...</p>
+          <div className="space-y-6">
+            {[...Array(2)].map((_, i) => (
+              <div key={i} className="tf-glass h-64 animate-pulse" />
+            ))}
           </div>
         ) : error ? (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-5 py-4 text-sm text-rose-200">
             {error}
           </div>
         ) : facturas.length === 0 ? (
-          <div className="text-center py-8">
-            <p className="text-gray-600 text-lg mb-4">No tienes pedidos aún</p>
-            <button 
-              onClick={() => router.push('/productos')}
-              className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-            >
+          <div className="tf-glass p-14 text-center">
+            <Receipt className="mx-auto mb-5 text-[#5b6b8f]" size={44} />
+            <p className="mb-7 text-lg text-[#8fa0c4]">No tienes pedidos aún</p>
+            <Link href="/productos" className="tf-btn tf-btn-primary">
               Ver Productos
-            </button>
+            </Link>
           </div>
         ) : (
           <div className="space-y-6">
-            {facturas.map(factura => (
-              <div key={factura.id} className="bg-white rounded-lg shadow-md p-6">
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <h3 className="text-lg font-semibold">Pedido #{factura.numero_factura}</h3>
-                    <p className="text-gray-600">Fecha: {new Date(factura.fecha_factura).toLocaleDateString('es-ES')}</p>
-                    <p className="text-gray-600">Método de pago: {factura.metodo_pago_display}</p>
-                  </div>
-                  <div className="text-right">
-                    <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
-                      getEstadoColor(factura.estado as EstadoFactura)
-                    }`}>
-                      {factura.estado_display}
-                    </span>
-                    <p className="text-xl font-bold text-blue-600 mt-2">${factura.total.toFixed(2)}</p>
-                    {factura.estado === 'pendiente' && (
-                      <button
-                        onClick={() => generarQR(factura)}
-                        className="mt-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm"
+            {facturas.map((factura) => {
+              const estado = estadoInfo(factura.estado);
+
+              return (
+                <div key={factura.id} className="tf-glass tf-glass-edge p-6 md:p-7">
+                  <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-lg font-bold text-[#e8eefc]">
+                        Pedido #{factura.numero_factura}
+                      </h3>
+                      <p className="mt-1 text-sm text-[#8fa0c4]">
+                        {new Date(factura.fecha_factura).toLocaleDateString('es-ES', {
+                          day: '2-digit',
+                          month: 'long',
+                          year: 'numeric',
+                        })}
+                      </p>
+                      <p className="text-sm text-[#8fa0c4]">Pago: Efectivo</p>
+                    </div>
+
+                    <div className="text-right">
+                      <span
+                        className={`inline-block rounded-full border px-3 py-1 text-xs font-semibold ${estado.className}`}
                       >
-                        Ver QR
-                      </button>
-                    )}
+                        {estado.label}
+                      </span>
+                      <p className="mt-2.5 text-2xl font-bold text-[#e8eefc]">
+                        ${factura.total.toFixed(2)}
+                      </p>
+                      {factura.estado === 'pendiente' && (
+                        <button
+                          onClick={() => generarQR(factura)}
+                          className="tf-btn tf-btn-ghost mt-3 !px-3.5 !py-1.5 text-xs"
+                        >
+                          <QrCode size={14} />
+                          Ver QR
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-                
-                <div className="border-t pt-4">
-                  <h4 className="font-medium mb-3">Productos:</h4>
-                  <div className="space-y-2 mb-4">
-                    {factura.productos?.map((producto, index) => (
-                      <div key={index} className="flex justify-between items-center">
-                        <div>
-                          <span className="font-medium">{producto.producto_nombre}</span>
-                          <span className="text-gray-600 ml-2">x{producto.cantidad}</span>
+
+                  <div className="border-t border-cyan-400/12 pt-5">
+                    <h4 className="mb-3.5 text-xs font-semibold uppercase tracking-wider text-cyan-300">
+                      Productos
+                    </h4>
+                    <div className="mb-5 space-y-2.5">
+                      {factura.productos?.map((producto, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between text-sm"
+                        >
+                          <span className="text-[#e8eefc]">
+                            {producto.producto_nombre}
+                            <span className="ml-2 text-[#5b6b8f]">
+                              × {producto.cantidad}
+                            </span>
+                          </span>
+                          <span className="text-[#e8eefc]">
+                            ${producto.precio_total.toFixed(2)}
+                          </span>
                         </div>
-                        <span className="font-medium">${producto.precio_total.toFixed(2)}</span>
-                      </div>
-                    ))}
-                  </div>
-                  
-                  {/* Desglose de factura */}
-                  <div className="border-t pt-3 space-y-1">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Subtotal:</span>
-                      <span>${factura.subtotal.toFixed(2)}</span>
+                      ))}
                     </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">IVA (15%):</span>
-                      <span>${factura.impuesto.toFixed(2)}</span>
-                    </div>
-                    {factura.descuento > 0 && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Descuento:</span>
-                        <span className="text-red-600">-${factura.descuento.toFixed(2)}</span>
+
+                    <div className="space-y-1.5 border-t border-cyan-400/12 pt-4 text-sm">
+                      <div className="flex justify-between text-[#8fa0c4]">
+                        <span>Subtotal</span>
+                        <span>${factura.subtotal.toFixed(2)}</span>
                       </div>
-                    )}
-                    <div className="flex justify-between font-bold text-lg border-t pt-2">
-                      <span>Total:</span>
-                      <span className="text-blue-600">${factura.total.toFixed(2)}</span>
+                      <div className="flex justify-between text-[#8fa0c4]">
+                        <span>IVA (15%)</span>
+                        <span>${factura.impuesto.toFixed(2)}</span>
+                      </div>
+                      {factura.descuento > 0 && (
+                        <div className="flex justify-between text-rose-300">
+                          <span>Descuento</span>
+                          <span>-${factura.descuento.toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between border-t border-cyan-400/12 pt-2.5 text-base font-bold text-[#e8eefc]">
+                        <span>Total</span>
+                        <span>${factura.total.toFixed(2)}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-                
-                {factura.estado === 'pendiente' && (
-                  <div className="mt-4 pt-4 border-t">
-                    <p className="text-sm text-gray-600">
-                      Tu pedido ha sido reservado. Presenta este qr para pagar.
+
+                  {factura.estado === 'pendiente' && (
+                    <p className="mt-5 border-t border-cyan-400/12 pt-5 text-sm text-[#8fa0c4]">
+                      Tu pedido está reservado. Presenta el código QR para pagarlo al
+                      recogerlo.
                     </p>
-                  </div>
-                )}
-              </div>
-            ))}
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
-    </Layout>
+    </TfLayout>
   );
 }

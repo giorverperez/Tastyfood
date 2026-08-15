@@ -36,7 +36,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
         if (payload.new && typeof payload.new === 'object' && 
             'producto_id' in payload.new && 'cantidad_actual' in payload.new) {
-          const stockData = payload.new as StockDiario;
+          // El payload de Realtime llega sin tipar; el `if` de arriba ya
+          // comprobó que trae los campos que se usan aquí.
+          const stockData = payload.new as unknown as StockDiario;
           setItems(currentItems =>
             currentItems.map(item =>
               item.id === stockData.producto_id

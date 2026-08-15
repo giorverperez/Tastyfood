@@ -1,12 +1,15 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { ArrowLeft, ArrowRight, Eye, EyeOff, Lock, Mail } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
@@ -20,29 +23,56 @@ export default function LoginPage() {
     try {
       await signIn(email, password);
       router.push('/');
-    } catch  {
-      setError('Error al iniciar sesión. Por favor, verifica tus credenciales.');
+    } catch (err: unknown) {
+      // Un correo sin confirmar no es una credencial incorrecta: decirlo así
+      // hace que el usuario reintente la contraseña sin llegar a nada.
+      const message = (err as { message?: string })?.message ?? '';
+
+      if (message.includes('Email not confirmed')) {
+        setError('Tu correo aún no está confirmado. Revisa tu bandeja de entrada.');
+      } else if (message.includes('Invalid login credentials')) {
+        setError('Correo o contraseña incorrectos.');
+      } else {
+        setError('Error al iniciar sesión. Por favor, intenta de nuevo.');
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-          Inicia sesión en tu cuenta
-        </h2>
-      </div>
+    <div className="tf-canvas flex min-h-screen flex-col items-center justify-center px-4 py-12">
+      <Link
+        href="/"
+        className="mb-8 inline-flex items-center gap-2 text-sm text-[#8fa0c4] transition-colors hover:text-cyan-300"
+      >
+        <ArrowLeft size={15} />
+        Volver al inicio
+      </Link>
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-white py-8 px-4 shadow sm:rounded-lg sm:px-10">
-          <form className="space-y-6" onSubmit={handleSubmit}>
+      <div className="w-full max-w-md">
+        <div className="mb-8 text-center">
+          <span className="tf-float relative mx-auto mb-6 grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-cyan-400 to-violet-500 text-3xl">
+            🍔
+            <span className="tf-pulse-ring absolute inset-0 rounded-2xl border border-cyan-300/60" />
+          </span>
+          <h1 className="text-3xl font-bold">
+            Bienvenido de <span className="tf-gradient-text">vuelta</span>
+          </h1>
+          <p className="mt-2.5 text-[#8fa0c4]">Entra para continuar con tu pedido</p>
+        </div>
+
+        <div className="tf-glass tf-glass-edge tf-glow-violet p-8">
+          <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="email" className="mb-2 block text-sm text-[#8fa0c4]">
                 Correo electrónico
               </label>
-              <div className="mt-1">
+              <div className="relative">
+                <Mail
+                  size={17}
+                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#5b6b8f]"
+                />
                 <input
                   id="email"
                   name="email"
@@ -51,67 +81,73 @@ export default function LoginPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  className="tf-input pl-11"
+                  placeholder="tu@correo.com"
                 />
               </div>
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="password" className="mb-2 block text-sm text-[#8fa0c4]">
                 Contraseña
               </label>
-              <div className="mt-1">
+              <div className="relative">
+                <Lock
+                  size={17}
+                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#5b6b8f]"
+                />
                 <input
                   id="password"
                   name="password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   autoComplete="current-password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  className="tf-input pl-11 pr-11"
+                  placeholder="••••••••"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#5b6b8f] transition-colors hover:text-cyan-300"
+                >
+                  {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                </button>
               </div>
             </div>
 
             {error && (
-              <div className="text-red-600 text-sm">
+              <div
+                role="alert"
+                className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200"
+              >
                 {error}
               </div>
             )}
 
-            <div>
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-              >
-                {isLoading ? 'Iniciando sesión...' : 'Iniciar sesión'}
-              </button>
-            </div>
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="tf-btn tf-btn-primary w-full"
+            >
+              {isLoading ? 'Iniciando sesión...' : 'Iniciar sesión'}
+              {!isLoading && <ArrowRight size={17} />}
+            </button>
           </form>
 
-          <div className="mt-6">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-300" />
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">
-                  ¿No tienes una cuenta?
-                </span>
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <button
-                onClick={() => router.push('/registro')}
-                className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-blue-600 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              >
-                Crear cuenta
-              </button>
-            </div>
+          <div className="my-7 flex items-center gap-4">
+            <span className="h-px flex-1 bg-gradient-to-r from-transparent to-cyan-400/25" />
+            <span className="text-xs uppercase tracking-wider text-[#5b6b8f]">
+              ¿No tienes cuenta?
+            </span>
+            <span className="h-px flex-1 bg-gradient-to-l from-transparent to-cyan-400/25" />
           </div>
+
+          <Link href="/registro" className="tf-btn tf-btn-ghost w-full">
+            Crear cuenta
+          </Link>
         </div>
       </div>
     </div>
